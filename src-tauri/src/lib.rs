@@ -1,6 +1,7 @@
 mod bg_remove;
 mod commands;
-mod model;
+mod models;
+mod settings;
 
 use bg_remove::InferenceState;
 
@@ -11,8 +12,13 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(InferenceState::new())
         .invoke_handler(tauri::generate_handler![
-            commands::model_status,
+            commands::list_models,
+            commands::get_settings,
+            commands::set_selected_model,
+            commands::set_theme,
             commands::download_model,
+            commands::clear_model,
+            commands::clear_all_models,
             commands::remove_background_single,
             commands::remove_background_batch,
         ])

@@ -9,7 +9,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::bg_remove::{self, InferenceState};
-use crate::model::{self, ModelStatus};
+use crate::models::{self, ModelInfo, ModelSpec};
+use crate::settings::{self, Settings};
 
 /// Preview images sent back to the frontend are capped to this size on
 /// their longest edge so before/after thumbnails stay a few hundred KB
@@ -28,7 +29,6 @@ pub struct SingleResult {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status")]
 pub enum BatchFileResult {
-    #[serde(rename_all = "camelCase")]
     Done { output_path: String },
     Error { message: String },
 }
@@ -43,15 +43,58 @@ pub struct BatchProgressEvent {
     pub result: BatchFileResult,
 }
 
-#[tauri::command]
-pub async fn model_status(app: AppHandle) -> Result<ModelStatus, String> {
-    model::model_status(&app)
+/// Resolves a model key from the frontend (which may omit it, meaning "use
+/// the user's default") into a concrete, known model spec.
+fn resolve_model(app: &AppHandle, model_key: Option<&str>) -> Result<&'static ModelSpec, String> {
+    let key = match model_key {
+        Some(key) => key.to_string(),
+        None => settings::load_settings(app)?.selected_model,
+    };
+    models::find_model(&key).ok_or_else(|| format!("unknown model \"{key}\""))
 }
 
 #[tauri::command]
-pub async fn download_model(app: AppHandle) -> Result<ModelStatus, String> {
-    model::ensure_model(&app).await?;
-    model::model_status(&app)
+pub async fn list_models(app: AppHandle) -> Result<Vec<ModelInfo>, String> {
+    models::list_models(&app)
+}
+
+#[tauri::command]
+pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
+    settings::load_settings(&app)
+}
+
+#[tauri::command]
+pub async fn set_selected_model(app: AppHandle, key: String) -> Result<Settings, String> {
+    settings::set_selected_model(&app, &key).await
+}
+
+#[tauri::command]
+pub async fn set_theme(app: AppHandle, theme: String) -> Result<Settings, String> {
+    settings::set_theme(&app, &theme).await
+}
+
+#[tauri::command]
+pub async fn clear_all_models(app: AppHandle) -> Result<(), String> {
+    for spec in models::MODELS {
+        models::clear_model(&app, spec).await?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn download_model(app: AppHandle, key: String) -> Result<ModelInfo, String> {
+    let spec = models::find_model(&key).ok_or_else(|| format!("unknown model \"{key}\""))?;
+    models::ensure_model(&app, spec).await?;
+    models::list_models(&app)?
+        .into_iter()
+        .find(|m| m.key == spec.key)
+        .ok_or_else(|| "model disappeared after download".to_string())
+}
+
+#[tauri::command]
+pub async fn clear_model(app: AppHandle, key: String) -> Result<(), String> {
+    let spec = models::find_model(&key).ok_or_else(|| format!("unknown model \"{key}\""))?;
+    models::clear_model(&app, spec).await
 }
 
 /// Removes the background from a single image and writes the result next
@@ -63,8 +106,10 @@ pub async fn remove_background_single(
     app: AppHandle,
     input_path: String,
     output_dir: Option<String>,
+    model_key: Option<String>,
 ) -> Result<SingleResult, String> {
-    let model_path = model::ensure_model(&app).await?;
+    let spec = resolve_model(&app, model_key.as_deref())?;
+    let model_path = models::ensure_model(&app, spec).await?;
     let input_path = PathBuf::from(input_path);
     let output_path = output_path_for(&input_path, output_dir.as_deref())?;
 
@@ -74,7 +119,8 @@ pub async fn remove_background_single(
         let before_data_url = to_data_url(&original)?;
 
         let inference = app.state::<InferenceState>();
-        let after = bg_remove::remove_background(inference.inner(), &model_path, &original)?;
+        let after =
+            bg_remove::remove_background(inference.inner(), spec, &model_path, &original)?;
         after
             .save_with_format(&output_path, ImageFormat::Png)
             .map_err(|e| format!("could not write output image: {e}"))?;
@@ -101,8 +147,10 @@ pub async fn remove_background_batch(
     app: AppHandle,
     input_paths: Vec<String>,
     output_dir: Option<String>,
+    model_key: Option<String>,
 ) -> Result<(), String> {
-    let model_path = model::ensure_model(&app).await?;
+    let spec = resolve_model(&app, model_key.as_deref())?;
+    let model_path = models::ensure_model(&app, spec).await?;
     let input_paths = expand_paths(&input_paths)?;
     let total = input_paths.len();
 
@@ -124,8 +172,12 @@ pub async fn remove_background_batch(
                     let original = image::open(&input_path)
                         .map_err(|e| format!("could not read image: {e}"))?;
                     let inference = app.state::<InferenceState>();
-                    let after =
-                        bg_remove::remove_background(inference.inner(), &model_path, &original)?;
+                    let after = bg_remove::remove_background(
+                        inference.inner(),
+                        spec,
+                        &model_path,
+                        &original,
+                    )?;
                     after
                         .save_with_format(&output_path, ImageFormat::Png)
                         .map_err(|e| format!("could not write output image: {e}"))?;

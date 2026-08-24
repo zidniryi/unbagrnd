@@ -1,12 +1,19 @@
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+// This project has no bundler (see README / tauri.conf.json `app.withGlobalTauri`),
+// so the Tauri JS APIs are read off the `window.__TAURI__` global injected at
+// runtime rather than imported as ES modules (bare specifiers like
+// "@tauri-apps/api/core" don't resolve without a bundler).
+const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const { getCurrentWebview } = window.__TAURI__.webview;
+const { ask, open } = window.__TAURI__.dialog;
+const { revealItemInDir } = window.__TAURI__.opener;
 
 const IMAGE_FILTERS = [
   { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tiff", "tif", "gif"] },
 ];
+
+// Models at or above this size get a confirmation dialog before downloading.
+const LARGE_MODEL_THRESHOLD = 100 * 1024 * 1024;
 
 const $ = (id) => document.getElementById(id);
 
@@ -15,14 +22,22 @@ const statusLine = $("status-line");
 const outputDirDisplay = $("output-dir-display");
 const clearOutputDirBtn = $("clear-output-dir-btn");
 
-// ---- Model banner ----
-const modelBanner = $("model-banner");
-const modelBannerTitle = $("model-banner-title");
-const modelBannerDetail = $("model-banner-detail");
-const modelBannerProgress = $("model-banner-progress");
+// ---- Model bar ----
+const modelSelect = $("model-select");
+const modelBadge = $("model-badge");
+const modelDownloadBtn = $("model-download-btn");
+const modelDownloadProgress = $("model-download-progress");
 const modelProgressFill = $("model-progress-fill");
 const modelProgressLabel = $("model-progress-label");
-const modelDownloadBtn = $("model-download-btn");
+const modelDesc = $("model-desc");
+
+// ---- Settings modal ----
+const settingsBtn = $("settings-btn");
+const settingsOverlay = $("settings-overlay");
+const settingsCloseBtn = $("settings-close-btn");
+const themeSelect = $("theme-select");
+const settingsModelList = $("settings-model-list");
+const clearAllModelsBtn = $("clear-all-models-btn");
 
 // ---- Tabs ----
 const tabSingle = $("tab-single");
@@ -54,7 +69,10 @@ const chooseOutputDirBtn = $("choose-output-dir-btn");
 
 // ---- App state ----
 let outputDir = null; // null = default: same folder as each source image
-let modelReadyPromise = null;
+let models = []; // ModelInfo[] from the backend
+let selectedModelKey = null;
+const activeProgress = {}; // key -> { downloaded, total } for in-flight downloads
+const downloadPromises = new Map(); // key -> in-flight download promise (dedupe)
 let lastSingleOutputPath = null;
 let lastBatchOutputDir = null;
 let busy = false;
@@ -76,65 +94,286 @@ function formatBytes(bytes) {
   return `${mb.toFixed(1)} MB`;
 }
 
+function findModel(key) {
+  return models.find((m) => m.key === key);
+}
+
 // ---------------------------------------------------------------------
-// Model download
+// Models: list, select, download, clear
 // ---------------------------------------------------------------------
 
-async function refreshModelBanner(status) {
-  if (status.downloaded) {
-    modelBanner.hidden = true;
+async function refreshModelsList() {
+  models = await invoke("list_models");
+  populateModelSelect();
+  renderModelBar();
+  if (!settingsOverlay.hidden) renderSettingsModelList();
+}
+
+function populateModelSelect() {
+  modelSelect.innerHTML = "";
+  for (const m of models) {
+    const opt = document.createElement("option");
+    opt.value = m.key;
+    opt.textContent = m.downloaded ? m.displayName : `${m.displayName} (${formatBytes(m.sizeBytes)})`;
+    modelSelect.appendChild(opt);
+  }
+  if (selectedModelKey) modelSelect.value = selectedModelKey;
+}
+
+function renderModelBar() {
+  const info = findModel(selectedModelKey);
+  if (!info) return;
+  modelDesc.textContent = info.description;
+
+  const progress = activeProgress[selectedModelKey];
+  if (progress) {
+    modelDownloadBtn.hidden = true;
+    modelDownloadProgress.hidden = false;
+    const pct = progress.total > 0 ? Math.min(100, (progress.downloaded / progress.total) * 100) : 0;
+    modelProgressFill.style.width = `${pct}%`;
+    modelProgressLabel.textContent = `${formatBytes(progress.downloaded)} / ${formatBytes(progress.total)}`;
+    modelBadge.textContent = "Downloading…";
+    modelBadge.className = "model-badge badge-warn";
     return;
   }
-  modelBanner.hidden = false;
-  modelBannerTitle.textContent = "One-time setup";
-  modelBannerDetail.textContent =
-    "Downloading the background-removal model (~170 MB), one time only. " +
-    "It's cached on your device — no further downloads after this.";
-}
 
-/**
- * Ensures the model is downloaded, starting the download (and showing
- * progress) if it isn't. Safe to call repeatedly; concurrent callers share
- * the same in-flight download.
- */
-function ensureModelReady() {
-  if (!modelReadyPromise) {
-    modelReadyPromise = downloadModel();
-  }
-  return modelReadyPromise;
-}
-
-async function downloadModel() {
-  modelBanner.hidden = false;
-  modelDownloadBtn.hidden = true;
-  modelBannerProgress.dataset.active = "true";
-  modelBannerTitle.textContent = "Downloading model…";
-
-  const unlisten = await listen("model-download-progress", (event) => {
-    const { downloadedBytes, totalBytes } = event.payload;
-    const pct = totalBytes > 0 ? Math.min(100, (downloadedBytes / totalBytes) * 100) : 0;
-    modelProgressFill.style.width = `${pct}%`;
-    modelProgressLabel.textContent = `${formatBytes(downloadedBytes)} / ${formatBytes(totalBytes)}`;
-  });
-
-  try {
-    const status = await invoke("download_model");
-    modelBanner.hidden = true;
-    return status;
-  } catch (err) {
-    modelBannerTitle.textContent = "Model download failed";
-    modelBannerDetail.textContent = String(err);
+  modelDownloadProgress.hidden = true;
+  if (info.downloaded) {
+    modelDownloadBtn.hidden = true;
+    modelBadge.textContent = "Ready";
+    modelBadge.className = "model-badge badge-ready";
+  } else {
     modelDownloadBtn.hidden = false;
-    modelReadyPromise = null; // allow retrying
-    throw err;
-  } finally {
-    unlisten();
-    modelBannerProgress.dataset.active = "false";
+    modelBadge.textContent = `Not downloaded (${formatBytes(info.sizeBytes)})`;
+    modelBadge.className = "model-badge badge-warn";
   }
 }
 
-modelDownloadBtn.addEventListener("click", () => {
-  ensureModelReady().catch(() => {});
+function renderSettingsModelList() {
+  settingsModelList.innerHTML = "";
+  for (const m of models) {
+    const li = document.createElement("li");
+    li.className = "settings-model-row";
+    const isSelected = m.key === selectedModelKey;
+    const progress = activeProgress[m.key];
+
+    const info = document.createElement("div");
+    info.className = "settings-model-info";
+
+    const nameEl = document.createElement("div");
+    nameEl.className = "settings-model-name";
+    nameEl.textContent = m.displayName;
+    if (isSelected) {
+      const badge = document.createElement("span");
+      badge.className = "model-current-badge";
+      badge.textContent = "Current";
+      nameEl.appendChild(badge);
+    }
+    info.appendChild(nameEl);
+
+    const descEl = document.createElement("div");
+    descEl.className = "settings-model-desc";
+    descEl.textContent = m.description;
+    info.appendChild(descEl);
+
+    const metaEl = document.createElement("div");
+    metaEl.className = "settings-model-meta";
+    metaEl.textContent = `${formatBytes(m.sizeBytes)}${m.downloaded ? " · Downloaded" : ""}`;
+    info.appendChild(metaEl);
+
+    li.appendChild(info);
+
+    const actions = document.createElement("div");
+    actions.className = "settings-model-actions";
+
+    if (progress) {
+      const pct = progress.total > 0 ? Math.min(100, (progress.downloaded / progress.total) * 100) : 0;
+      const bar = document.createElement("div");
+      bar.className = "settings-model-progress";
+      const track = document.createElement("div");
+      track.className = "progress-track";
+      const fill = document.createElement("div");
+      fill.className = "progress-fill";
+      fill.style.width = `${pct}%`;
+      track.appendChild(fill);
+      const label = document.createElement("span");
+      label.textContent = `${formatBytes(progress.downloaded)} / ${formatBytes(progress.total)}`;
+      bar.append(track, label);
+      actions.appendChild(bar);
+    } else {
+      if (!isSelected) {
+        const useBtn = document.createElement("button");
+        useBtn.className = "btn btn-secondary btn-sm";
+        useBtn.type = "button";
+        useBtn.textContent = "Use";
+        useBtn.addEventListener("click", () => selectModel(m.key));
+        actions.appendChild(useBtn);
+      }
+      if (m.downloaded) {
+        const clearBtn = document.createElement("button");
+        clearBtn.className = "btn btn-link";
+        clearBtn.type = "button";
+        clearBtn.textContent = "Clear";
+        if (isSelected) {
+          clearBtn.disabled = true;
+          clearBtn.title = "Can't clear the model currently in use";
+        }
+        clearBtn.addEventListener("click", () => clearOneModel(m.key));
+        actions.appendChild(clearBtn);
+      } else {
+        const dlBtn = document.createElement("button");
+        dlBtn.className = "btn btn-primary btn-sm";
+        dlBtn.type = "button";
+        dlBtn.textContent = "Download";
+        dlBtn.addEventListener("click", () => downloadOneModel(m.key));
+        actions.appendChild(dlBtn);
+      }
+    }
+
+    li.appendChild(actions);
+    settingsModelList.appendChild(li);
+  }
+}
+
+/** Downloads `key`, deduping concurrent callers onto the same in-flight request. */
+function downloadModelWithProgress(key) {
+  if (downloadPromises.has(key)) return downloadPromises.get(key);
+  const promise = (async () => {
+    activeProgress[key] = { downloaded: 0, total: 0 };
+    renderModelBar();
+    renderSettingsModelList();
+    try {
+      const info = await invoke("download_model", { key });
+      const idx = models.findIndex((m) => m.key === key);
+      if (idx >= 0) models[idx] = info;
+      return info;
+    } finally {
+      delete activeProgress[key];
+      downloadPromises.delete(key);
+      renderModelBar();
+      renderSettingsModelList();
+    }
+  })();
+  downloadPromises.set(key, promise);
+  return promise;
+}
+
+/** Ensures `key` is downloaded, asking for confirmation first if it's large. */
+async function ensureModelReady(key) {
+  const info = findModel(key);
+  if (info?.downloaded) return info;
+  if (info && info.sizeBytes >= LARGE_MODEL_THRESHOLD) {
+    const proceed = await ask(
+      `"${info.displayName}" is ${formatBytes(info.sizeBytes)}. Download it now? ` +
+        "This happens once — it's cached on your device afterward.",
+      { title: "Download model", kind: "info" },
+    );
+    if (!proceed) throw new Error("Download cancelled.");
+  }
+  return downloadModelWithProgress(key);
+}
+
+async function selectModel(key) {
+  const previous = selectedModelKey;
+  selectedModelKey = key;
+  populateModelSelect();
+  renderModelBar();
+  renderSettingsModelList();
+  try {
+    await ensureModelReady(key);
+    await invoke("set_selected_model", { key });
+  } catch (err) {
+    selectedModelKey = previous;
+    populateModelSelect();
+    renderModelBar();
+    renderSettingsModelList();
+    setStatus(`Failed: ${err}`);
+    return;
+  }
+  await refreshModelsList();
+  setStatus("Ready.");
+}
+
+async function downloadOneModel(key) {
+  try {
+    await ensureModelReady(key);
+    await refreshModelsList();
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  }
+}
+
+async function clearOneModel(key) {
+  try {
+    await invoke("clear_model", { key });
+    await refreshModelsList();
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  }
+}
+
+modelSelect.addEventListener("change", () => {
+  selectModel(modelSelect.value).catch(() => {});
+});
+
+modelDownloadBtn.addEventListener("click", async () => {
+  try {
+    await ensureModelReady(selectedModelKey);
+    await refreshModelsList();
+    setStatus("Ready.");
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  }
+});
+
+clearAllModelsBtn.addEventListener("click", async () => {
+  const proceed = await ask(
+    "Remove all downloaded models from disk? You'll need to re-download them next time you use them.",
+    { title: "Clear all models", kind: "warning" },
+  );
+  if (!proceed) return;
+  try {
+    await invoke("clear_all_models");
+    await refreshModelsList();
+    setStatus("Cleared all cached models.");
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  }
+});
+
+// ---------------------------------------------------------------------
+// Settings modal
+// ---------------------------------------------------------------------
+
+function applyTheme(theme) {
+  if (theme === "system") {
+    delete document.documentElement.dataset.theme;
+  } else {
+    document.documentElement.dataset.theme = theme;
+  }
+}
+
+settingsBtn.addEventListener("click", () => {
+  renderSettingsModelList();
+  settingsOverlay.hidden = false;
+});
+
+settingsCloseBtn.addEventListener("click", () => {
+  settingsOverlay.hidden = true;
+});
+
+settingsOverlay.addEventListener("click", (event) => {
+  if (event.target === settingsOverlay) settingsOverlay.hidden = true;
+});
+
+themeSelect.addEventListener("change", async () => {
+  const theme = themeSelect.value;
+  applyTheme(theme);
+  try {
+    await invoke("set_theme", { theme });
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  }
 });
 
 // ---------------------------------------------------------------------
@@ -203,12 +442,13 @@ async function processSingle(path) {
   setBusy(true);
   try {
     setStatus("Preparing…");
-    await ensureModelReady();
+    await ensureModelReady(selectedModelKey);
 
     setStatus("Removing background…");
     const result = await invoke("remove_background_single", {
       inputPath: path,
       outputDir,
+      modelKey: selectedModelKey,
     });
 
     previewBefore.src = result.beforeDataUrl;
@@ -309,10 +549,10 @@ async function processBatch(paths) {
 
   try {
     setStatus("Preparing…");
-    await ensureModelReady();
+    await ensureModelReady(selectedModelKey);
 
     setStatus("Removing backgrounds…");
-    await invoke("remove_background_batch", { inputPaths: paths, outputDir });
+    await invoke("remove_background_batch", { inputPaths: paths, outputDir, modelKey: selectedModelKey });
     setStatus("Batch complete.");
   } catch (err) {
     setStatus(`Failed: ${err}`);
@@ -388,28 +628,26 @@ async function setupDragAndDrop() {
 async function init() {
   activateTab("single");
   refreshOutputDirDisplay();
-
-  let modelCheckFailed = false;
-  try {
-    const status = await invoke("model_status");
-    document.body.insertAdjacentHTML(
-      "afterbegin",
-      '<div style="background:orange;color:black;font-size:14px;padding:6px;white-space:pre-wrap;">STATUS: ' +
-        JSON.stringify(status) +
-        "</div>",
-    );
-    await refreshModelBanner(status);
-    if (!status.downloaded) {
-      ensureModelReady().catch(() => {});
-    }
-  } catch (err) {
-    modelCheckFailed = true;
-    setStatus(`Could not check model status: ${err}`);
-  }
-
   await setupDragAndDrop();
-  if (!modelCheckFailed) {
+
+  await listen("model-download-progress", (event) => {
+    const { key, downloadedBytes, totalBytes } = event.payload;
+    activeProgress[key] = { downloaded: downloadedBytes, total: totalBytes };
+    renderModelBar();
+    if (!settingsOverlay.hidden) renderSettingsModelList();
+  });
+
+  try {
+    const [modelList, settings] = await Promise.all([invoke("list_models"), invoke("get_settings")]);
+    models = modelList;
+    selectedModelKey = settings.selectedModel;
+    applyTheme(settings.theme);
+    themeSelect.value = settings.theme;
+    populateModelSelect();
+    renderModelBar();
     setStatus("Ready.");
+  } catch (err) {
+    setStatus(`Could not load models: ${err}`);
   }
 }
 

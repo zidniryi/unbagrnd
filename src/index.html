@@ -17,20 +17,23 @@
           </div>
           <p class="brand-tagline">Remove image backgrounds. 100% on your device.</p>
         </div>
+        <button id="settings-btn" class="btn-icon" type="button" aria-label="Settings" title="Settings">⚙</button>
       </header>
 
-      <section id="model-banner" class="model-banner" hidden>
-        <div class="model-banner-text">
-          <strong id="model-banner-title">One-time setup</strong>
-          <span id="model-banner-detail">Downloading the background-removal model (~170&nbsp;MB), one time only. It's cached on your device — no further downloads after this.</span>
+      <section class="model-bar">
+        <div class="model-bar-row">
+          <label class="model-bar-label" for="model-select">Model</label>
+          <select id="model-select" class="model-select"></select>
+          <span id="model-badge" class="model-badge"></span>
+          <button id="model-download-btn" class="btn btn-primary btn-sm" type="button" hidden>Download</button>
         </div>
-        <div class="model-banner-progress">
+        <div id="model-download-progress" class="model-download-progress" hidden>
           <div class="progress-track">
             <div id="model-progress-fill" class="progress-fill" style="width: 0%"></div>
           </div>
           <span id="model-progress-label">0%</span>
         </div>
-        <button id="model-download-btn" class="btn btn-primary" type="button">Download model</button>
+        <p id="model-desc" class="model-desc"></p>
       </section>
 
       <nav class="tabs" role="tablist" aria-label="Mode">
@@ -111,6 +114,34 @@
       <footer class="app-footer">
         <span id="status-line">Ready.</span>
       </footer>
+    </div>
+
+    <div id="settings-overlay" class="settings-overlay" hidden>
+      <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="settings-header">
+          <h2 id="settings-title">Settings</h2>
+          <button id="settings-close-btn" class="btn-icon" type="button" aria-label="Close settings">✕</button>
+        </div>
+        <div class="settings-body">
+          <section class="settings-section">
+            <h3>Appearance</h3>
+            <div class="settings-row">
+              <span>Theme</span>
+              <select id="theme-select">
+                <option value="system">System</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+              </select>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h3>Models</h3>
+            <ul id="settings-model-list" class="settings-model-list"></ul>
+            <button id="clear-all-models-btn" class="btn btn-link" type="button">Clear all cached models</button>
+          </section>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="main.js"></script>
