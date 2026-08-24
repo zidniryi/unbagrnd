@@ -1,0 +1,59 @@
+[package]
+name = "unbagrnd"
+version = "0.1.0"
+description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
+authors = ["unbagrnd contributors"]
+license = "MIT"
+repository = "https://github.com/unbagrnd/unbagrnd"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "unbagrnd_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# ONNX Runtime inference. Pinned to an exact rc so the API this crate is
+# written against doesn't drift out from under it - the 2.0 API has changed
+# between rc releases. `download-binaries` and `ndarray` are already on by
+# default for this crate, but are named explicitly here so the intent is
+# obvious to readers of this file.
+ort = { version = "=2.0.0-rc.13", default-features = true, features = ["download-binaries", "ndarray"] }
+ndarray = "0.17"
+
+# Image decode/resize/encode.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff", "gif"] }
+
+# One-time model download. Default features already select the rustls TLS
+# backend (no system OpenSSL needed on Linux CI runners).
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "fs", "io-util"] }
+
+# Integrity check on the downloaded model file.
+sha2 = "0.11"
+hex = "0.4"
+
+# Encoding before/after previews as data URLs for the frontend, so the
+# webview never needs filesystem or asset-protocol access.
+base64 = "0.23"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

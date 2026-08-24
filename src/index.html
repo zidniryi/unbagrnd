@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>unbagrnd</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="app-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">◐</span>
+          <span class="brand-name">unbagrnd</span>
+        </div>
+        <p class="brand-tagline">Remove image backgrounds. 100% on your device.</p>
+      </header>
+
+      <section id="model-banner" class="model-banner" hidden>
+        <div class="model-banner-text">
+          <strong id="model-banner-title">One-time setup</strong>
+          <span id="model-banner-detail">Downloading the background-removal model (~170&nbsp;MB), one time only. It's cached on your device — no further downloads after this.</span>
+        </div>
+        <div class="model-banner-progress">
+          <div class="progress-track">
+            <div id="model-progress-fill" class="progress-fill" style="width: 0%"></div>
+          </div>
+          <span id="model-progress-label">0%</span>
+        </div>
+        <button id="model-download-btn" class="btn btn-primary" type="button">Download model</button>
+      </section>
+
+      <nav class="tabs" role="tablist" aria-label="Mode">
+        <button class="tab active" id="tab-single" role="tab" aria-selected="true" type="button">Single</button>
+        <button class="tab" id="tab-batch" role="tab" aria-selected="false" type="button">Batch</button>
+      </nav>
+
+      <main>
+        <section id="panel-single" class="panel" role="tabpanel" aria-labelledby="tab-single">
+          <div id="single-dropzone" class="dropzone">
+            <div class="dropzone-inner">
+              <span class="dropzone-icon" aria-hidden="true">⬆</span>
+              <p>Drag &amp; drop an image here</p>
+              <p class="dropzone-sub">or</p>
+              <button id="single-pick-btn" class="btn btn-secondary" type="button">Choose an image…</button>
+            </div>
+          </div>
+
+          <div id="single-result" class="result" hidden>
+            <div class="preview-grid">
+              <figure class="preview">
+                <figcaption>Before</figcaption>
+                <div class="preview-frame"><img id="preview-before" alt="Original image" /></div>
+              </figure>
+              <figure class="preview">
+                <figcaption>After</figcaption>
+                <div class="preview-frame checkerboard"><img id="preview-after" alt="Background removed" /></div>
+              </figure>
+            </div>
+            <div class="result-actions">
+              <span id="single-output-path" class="output-path"></span>
+              <div class="result-buttons">
+                <button id="single-reveal-btn" class="btn btn-secondary" type="button">Reveal in folder</button>
+                <button id="single-reset-btn" class="btn btn-secondary" type="button">Process another</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section id="panel-batch" class="panel" role="tabpanel" aria-labelledby="tab-batch" hidden>
+          <div id="batch-dropzone" class="dropzone">
+            <div class="dropzone-inner">
+              <span class="dropzone-icon" aria-hidden="true">⬆</span>
+              <p>Drag &amp; drop images or a folder here</p>
+              <p class="dropzone-sub">or</p>
+              <div class="dropzone-buttons">
+                <button id="batch-pick-files-btn" class="btn btn-secondary" type="button">Choose images…</button>
+                <button id="batch-pick-folder-btn" class="btn btn-secondary" type="button">Choose a folder…</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="batch-result" class="result" hidden>
+            <div class="batch-progress">
+              <div class="progress-track">
+                <div id="batch-progress-fill" class="progress-fill" style="width: 0%"></div>
+              </div>
+              <span id="batch-progress-label">0 / 0</span>
+            </div>
+            <ul id="batch-file-list" class="file-list"></ul>
+            <div class="result-actions">
+              <button id="batch-reveal-btn" class="btn btn-secondary" type="button">Reveal output folder</button>
+              <button id="batch-reset-btn" class="btn btn-secondary" type="button">Process another batch</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <section class="output-settings">
+        <label class="output-settings-label" for="output-dir-display">Save to</label>
+        <div class="output-settings-row">
+          <span id="output-dir-display" class="output-dir-display">Same folder as the original image</span>
+          <button id="choose-output-dir-btn" class="btn btn-link" type="button">Change…</button>
+          <button id="clear-output-dir-btn" class="btn btn-link" type="button" hidden>Reset to default</button>
+        </div>
+      </section>
+
+      <footer class="app-footer">
+        <span id="status-line">Ready.</span>
+      </footer>
+    </div>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>
