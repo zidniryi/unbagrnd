@@ -22,6 +22,16 @@ required after a one-time setup step.
   window.
 - **Cross-platform.** macOS, Windows, and Linux.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshot-landing.png" alt="unbagrnd main window" width="49%" />
+  <img src="docs/screenshot-single.png" alt="unbagrnd single-image result" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/screenshot-settings.png" alt="unbagrnd settings" width="49%" />
+</p>
+
 ## How it works
 
 unbagrnd runs [IS-Net "general use"](https://github.com/danielgatis/rembg)
