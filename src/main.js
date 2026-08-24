@@ -63,18 +63,6 @@ function setStatus(text) {
   statusLine.textContent = text;
 }
 
-function debugLog(text) {
-  let log = document.getElementById("debug-log");
-  if (!log) {
-    log = document.createElement("pre");
-    log.id = "debug-log";
-    log.style.cssText =
-      "position:fixed;bottom:0;left:0;right:0;max-height:200px;overflow:auto;background:black;color:lime;font-size:10px;margin:0;padding:4px;z-index:9999;white-space:pre-wrap;";
-    document.body.appendChild(log);
-  }
-  log.textContent += text + "\n";
-}
-
 function setBusy(isBusy) {
   busy = isBusy;
   for (const btn of document.querySelectorAll("button")) {
@@ -117,7 +105,6 @@ function ensureModelReady() {
 }
 
 async function downloadModel() {
-  debugLog("downloadModel() entered");
   modelBanner.hidden = false;
   modelDownloadBtn.hidden = true;
   modelBannerProgress.dataset.active = "true";
@@ -402,21 +389,28 @@ async function init() {
   activateTab("single");
   refreshOutputDirDisplay();
 
+  let modelCheckFailed = false;
   try {
-    debugLog("calling model_status");
     const status = await invoke("model_status");
-    debugLog(`model_status returned downloaded=${status.downloaded}`);
+    document.body.insertAdjacentHTML(
+      "afterbegin",
+      '<div style="background:orange;color:black;font-size:14px;padding:6px;white-space:pre-wrap;">STATUS: ' +
+        JSON.stringify(status) +
+        "</div>",
+    );
     await refreshModelBanner(status);
     if (!status.downloaded) {
-      debugLog("calling ensureModelReady");
-      ensureModelReady().catch((e) => debugLog(`ensureModelReady rejected: ${e}`));
+      ensureModelReady().catch(() => {});
     }
   } catch (err) {
+    modelCheckFailed = true;
     setStatus(`Could not check model status: ${err}`);
   }
 
   await setupDragAndDrop();
-  setStatus("Ready.");
+  if (!modelCheckFailed) {
+    setStatus("Ready.");
+  }
 }
 
 init();
