@@ -577,14 +577,16 @@ async function processBatch(paths) {
 
   const unlisten = await listen("batch-progress", (event) => {
     const { index, total, fileName, status, outputPath, afterDataUrl, message } = event.payload;
-    console.log("[batch-progress]", {
-      index,
-      status,
-      outputPath,
-      afterDataUrlLength: afterDataUrl ? afterDataUrl.length : null,
-      afterDataUrlPrefix: afterDataUrl ? afterDataUrl.slice(0, 40) : null,
-      message,
-    });
+    document.body.insertAdjacentHTML(
+      "beforeend",
+      '<pre style="position:fixed;top:0;left:0;right:0;max-height:45vh;overflow:auto;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:999;white-space:pre-wrap;word-break:break-all;">' +
+        `[batch-progress] index=${index} status=${status}\n` +
+        `outputPath=${outputPath}\n` +
+        `afterDataUrl type=${typeof afterDataUrl} length=${afterDataUrl ? afterDataUrl.length : "N/A"}\n` +
+        `afterDataUrl value=${afterDataUrl}\n` +
+        `message=${message}` +
+        "</pre>",
+    );
 
     let row = rowsByIndex[index];
     if (!row) {

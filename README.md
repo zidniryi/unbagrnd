@@ -1,4 +1,8 @@
-# unbagrnd
+<p align="center">
+  <img src="src/logo.png" alt="unbagrnd logo" width="128" height="128" />
+</p>
+
+<h1 align="center">unbagrnd</h1>
 
 A small desktop app that removes the background from images — entirely on
 your device. No cloud API, no account, no telemetry, and no internet access
@@ -8,9 +12,12 @@ required after a one-time setup step.
   Runtime. No image, filename, or metadata is ever sent anywhere.
 - **100% free & open source.** MIT-licensed, built on a free, open-source
   stack — no API keys, no paid tiers, no usage limits.
-- **Offline after setup.** The only network request the app ever makes is
-  downloading the background-removal model once, on first use (~170 MB,
-  cached locally after that). Nothing else — no analytics, no update checks.
+- **Pick your model.** Choose from several background-removal models in
+  Settings, trading off speed vs. accuracy. Each downloads once on first use
+  (starting at ~43 MB for the default) and is cached locally after that.
+- **Offline after setup.** The only network requests the app ever makes are
+  those one-time model downloads. Nothing else — no analytics, no update
+  checks.
 - **Single and batch.** Process one image, or a whole folder, from the same
   window.
 - **Cross-platform.** macOS, Windows, and Linux.
