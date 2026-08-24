@@ -2,7 +2,7 @@
 name = "unbagrnd"
 version = "0.1.0"
 description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
-authors = ["unbagrnd contributors"]
+authors = ["zidniryi"]
 license = "MIT"
 repository = "https://github.com/unbagrnd/unbagrnd"
 edition = "2021"
@@ -50,6 +50,9 @@ hex = "0.4"
 # Encoding before/after previews as data URLs for the frontend, so the
 # webview never needs filesystem or asset-protocol access.
 base64 = "0.23"
+
+# System-wide CPU/RAM usage shown in the footer.
+sysinfo = "0.33"
 
 [profile.release]
 panic = "abort"

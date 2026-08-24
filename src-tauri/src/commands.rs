@@ -29,9 +29,18 @@ pub struct SingleResult {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status")]
 pub enum BatchFileResult {
-    Done { output_path: String },
-    Error { message: String },
+    Done {
+        output_path: String,
+        after_data_url: String,
+    },
+    Error {
+        message: String,
+    },
 }
+
+/// Batch row thumbnails are much smaller than single-mode previews since
+/// they only need to render at list-row size.
+const BATCH_THUMB_MAX_DIM: u32 = 160;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -167,7 +176,7 @@ pub async fn remove_background_batch(
             let output_dir = output_dir.clone();
             let input_path = input_path.clone();
             let outcome = tauri::async_runtime::spawn_blocking(
-                move || -> Result<PathBuf, String> {
+                move || -> Result<(PathBuf, String), String> {
                     let output_path = output_path_for(&input_path, output_dir.as_deref())?;
                     let original = image::open(&input_path)
                         .map_err(|e| format!("could not read image: {e}"))?;
@@ -181,15 +190,18 @@ pub async fn remove_background_batch(
                     after
                         .save_with_format(&output_path, ImageFormat::Png)
                         .map_err(|e| format!("could not write output image: {e}"))?;
-                    Ok(output_path)
+                    let after_data_url =
+                        to_data_url_sized(&DynamicImage::ImageRgba8(after), BATCH_THUMB_MAX_DIM)?;
+                    Ok((output_path, after_data_url))
                 },
             )
             .await
             .map_err(|e| format!("background task failed: {e}"));
 
             match outcome {
-                Ok(Ok(output_path)) => BatchFileResult::Done {
+                Ok(Ok((output_path, after_data_url))) => BatchFileResult::Done {
                     output_path: output_path.display().to_string(),
+                    after_data_url,
                 },
                 Ok(Err(message)) | Err(message) => BatchFileResult::Error { message },
             }
@@ -272,8 +284,12 @@ fn output_path_for(input_path: &Path, output_dir: Option<&str>) -> Result<PathBu
 }
 
 fn to_data_url(img: &DynamicImage) -> Result<String, String> {
-    let preview = if img.width() > PREVIEW_MAX_DIM || img.height() > PREVIEW_MAX_DIM {
-        img.resize(PREVIEW_MAX_DIM, PREVIEW_MAX_DIM, FilterType::Triangle)
+    to_data_url_sized(img, PREVIEW_MAX_DIM)
+}
+
+fn to_data_url_sized(img: &DynamicImage, max_dim: u32) -> Result<String, String> {
+    let preview = if img.width() > max_dim || img.height() > max_dim {
+        img.resize(max_dim, max_dim, FilterType::Triangle)
     } else {
         img.clone()
     };

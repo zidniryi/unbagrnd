@@ -72,8 +72,9 @@ jobs:
             See the assets below to download and install unbagrnd for your platform.
 
             unbagrnd removes image backgrounds entirely on-device: no cloud API,
-            no account, and no telemetry. The background-removal model
-            (~170 MB) downloads once on first use and is cached locally.
+            no account, and no telemetry. Pick from several background-removal
+            models in Settings; each one downloads once on first use (starting
+            at ~43 MB for the default) and is cached locally after that.
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}

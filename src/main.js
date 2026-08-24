@@ -19,6 +19,7 @@ const $ = (id) => document.getElementById(id);
 
 // ---- Shared elements ----
 const statusLine = $("status-line");
+const resourceUsageEl = $("resource-usage");
 const outputDirDisplay = $("output-dir-display");
 const clearOutputDirBtn = $("clear-output-dir-btn");
 
@@ -48,6 +49,10 @@ const panelBatch = $("panel-batch");
 // ---- Single mode ----
 const singleDropzone = $("single-dropzone");
 const singlePickBtn = $("single-pick-btn");
+const singleLoading = $("single-loading");
+const singleLoadingText = $("single-loading-text");
+const singleProgressFill = $("single-progress-fill");
+const singleProgressLabel = $("single-progress-label");
 const singleResult = $("single-result");
 const previewBefore = $("preview-before");
 const previewAfter = $("preview-after");
@@ -437,29 +442,68 @@ singleRevealBtn.addEventListener("click", () => {
   }
 });
 
+/**
+ * There's no real per-percent progress signal for a single inference call
+ * (ONNX Runtime doesn't expose one), so this eases a fill toward 90% while
+ * the request is in flight and snaps to 100% the moment it resolves — an
+ * honest "still working" indicator rather than a claim of exact progress.
+ */
+function startFakeProgress(fillEl, labelEl) {
+  let pct = 0;
+  fillEl.style.width = "0%";
+  labelEl.textContent = "0%";
+  const timer = setInterval(() => {
+    pct += (90 - pct) * 0.1 + 0.4;
+    if (pct > 90) pct = 90;
+    fillEl.style.width = `${pct}%`;
+    labelEl.textContent = `${Math.round(pct)}%`;
+  }, 150);
+  return {
+    finish() {
+      clearInterval(timer);
+      fillEl.style.width = "100%";
+      labelEl.textContent = "100%";
+    },
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
 async function processSingle(path) {
   if (busy) return;
   setBusy(true);
+  singleDropzone.hidden = true;
+  singleResult.hidden = true;
+  singleLoadingText.textContent = "Preparing…";
+  singleLoading.hidden = false;
+  const progress = startFakeProgress(singleProgressFill, singleProgressLabel);
   try {
     setStatus("Preparing…");
     await ensureModelReady(selectedModelKey);
 
     setStatus("Removing background…");
+    singleLoadingText.textContent = "Removing background…";
     const result = await invoke("remove_background_single", {
       inputPath: path,
       outputDir,
       modelKey: selectedModelKey,
     });
 
+    progress.finish();
     previewBefore.src = result.beforeDataUrl;
     previewAfter.src = result.afterDataUrl;
     singleOutputPathEl.textContent = result.outputPath;
     lastSingleOutputPath = result.outputPath;
 
+    singleLoading.hidden = true;
     singleDropzone.hidden = true;
     singleResult.hidden = false;
     setStatus("Done.");
   } catch (err) {
+    progress.stop();
+    singleLoading.hidden = true;
+    singleDropzone.hidden = false;
     setStatus(`Failed: ${err}`);
   } finally {
     setBusy(false);
@@ -491,23 +535,32 @@ batchResetBtn.addEventListener("click", () => {
 });
 
 batchRevealBtn.addEventListener("click", () => {
+  console.log("[reveal] lastBatchOutputDir =", lastBatchOutputDir);
   if (lastBatchOutputDir) {
-    revealItemInDir(lastBatchOutputDir).catch((err) => setStatus(String(err)));
+    revealItemInDir(lastBatchOutputDir)
+      .then(() => console.log("[reveal] succeeded"))
+      .catch((err) => {
+        console.error("[reveal] failed", err);
+        setStatus(String(err));
+      });
   }
 });
 
 function renderBatchRow(fileName) {
   const li = document.createElement("li");
   li.dataset.file = fileName;
+  const thumbEl = document.createElement("div");
+  thumbEl.className = "file-thumb";
+  thumbEl.innerHTML = '<span class="file-thumb-spinner"></span>';
   const nameEl = document.createElement("span");
   nameEl.className = "file-name";
   nameEl.textContent = fileName;
   const statusEl = document.createElement("span");
   statusEl.className = "file-status pending";
   statusEl.textContent = "Waiting…";
-  li.append(nameEl, statusEl);
+  li.append(thumbEl, nameEl, statusEl);
   batchFileList.appendChild(li);
-  return statusEl;
+  return { thumbEl, statusEl };
 }
 
 async function processBatch(paths) {
@@ -523,22 +576,38 @@ async function processBatch(paths) {
   const rowsByIndex = [];
 
   const unlisten = await listen("batch-progress", (event) => {
-    const { index, total, fileName, status, outputPath, message } = event.payload;
+    const { index, total, fileName, status, outputPath, afterDataUrl, message } = event.payload;
+    console.log("[batch-progress]", {
+      index,
+      status,
+      outputPath,
+      afterDataUrlLength: afterDataUrl ? afterDataUrl.length : null,
+      afterDataUrlPrefix: afterDataUrl ? afterDataUrl.slice(0, 40) : null,
+      message,
+    });
 
-    let statusEl = rowsByIndex[index];
-    if (!statusEl) {
-      statusEl = renderBatchRow(fileName);
-      rowsByIndex[index] = statusEl;
+    let row = rowsByIndex[index];
+    if (!row) {
+      row = renderBatchRow(fileName);
+      rowsByIndex[index] = row;
     }
+    const { thumbEl, statusEl } = row;
 
     if (status === "done") {
       statusEl.textContent = "Done";
       statusEl.className = "file-status done";
       lastBatchOutputDir = parentDir(outputPath);
+      thumbEl.innerHTML = "";
+      thumbEl.classList.add("checkerboard");
+      const img = document.createElement("img");
+      img.src = afterDataUrl;
+      img.alt = "";
+      thumbEl.appendChild(img);
     } else {
       statusEl.textContent = message ?? "Failed";
       statusEl.className = "file-status error";
       statusEl.title = message ?? "";
+      thumbEl.innerHTML = '<span class="file-thumb-error">!</span>';
     }
 
     const done = index + 1;
@@ -622,6 +691,20 @@ async function setupDragAndDrop() {
 }
 
 // ---------------------------------------------------------------------
+// Resource usage (footer)
+// ---------------------------------------------------------------------
+
+async function pollResourceUsage() {
+  try {
+    const { cpuPercent, ramPercent } = await invoke("get_system_usage");
+    const pad = "    ";
+    resourceUsageEl.textContent = `CPU: ${Math.round(cpuPercent)}%${pad}|${pad}RAM: ${Math.round(ramPercent)}%`;
+  } catch {
+    // Non-critical; leave the last known reading in place.
+  }
+}
+
+// ---------------------------------------------------------------------
 // Startup
 // ---------------------------------------------------------------------
 
@@ -629,6 +712,9 @@ async function init() {
   activateTab("single");
   refreshOutputDirDisplay();
   await setupDragAndDrop();
+
+  pollResourceUsage();
+  setInterval(pollResourceUsage, 2000);
 
   await listen("model-download-progress", (event) => {
     const { key, downloadedBytes, totalBytes } = event.payload;

@@ -15,7 +15,7 @@
             <span class="brand-name"><span class="brand-name-initial">u</span>nbagrnd</span>
             <span class="brand-version">0.1.0</span>
           </div>
-          <p class="brand-tagline">Remove image backgrounds. 100% on your device.</p>
+          <p class="brand-tagline">AI-powered background removal — 100% on your device.</p>
         </div>
         <button id="settings-btn" class="btn-icon" type="button" aria-label="Settings" title="Settings">⚙</button>
       </header>
@@ -49,6 +49,17 @@
               <p>Drag &amp; drop an image here</p>
               <p class="dropzone-sub">or</p>
               <button id="single-pick-btn" class="btn btn-secondary" type="button">Choose an image…</button>
+            </div>
+          </div>
+
+          <div id="single-loading" class="loading-panel" hidden>
+            <div class="spinner"></div>
+            <p id="single-loading-text">Preparing…</p>
+            <div class="single-loading-progress">
+              <div class="progress-track">
+                <div id="single-progress-fill" class="progress-fill" style="width: 0%"></div>
+              </div>
+              <span id="single-progress-label">0%</span>
             </div>
           </div>
 
@@ -113,6 +124,7 @@
 
       <footer class="app-footer">
         <span id="status-line">Ready.</span>
+        <span id="resource-usage" class="resource-usage"></span>
       </footer>
     </div>
 
