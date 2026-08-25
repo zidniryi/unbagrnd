@@ -4,15 +4,16 @@
 
 <h1 align="center">unbagrnd</h1>
 
-A small desktop app that removes the background from images — entirely on
-your device. No cloud API, no account, no telemetry, and no internet access
-required after a one-time setup step.
+A small desktop app that uses AI to remove the background from images —
+entirely on your device. No cloud API, no account, no telemetry, and no
+internet access required after a one-time setup step.
 
-- **100% local inference.** Background removal runs on-device via ONNX
-  Runtime. No image, filename, or metadata is ever sent anywhere.
+- **On-device AI.** Background removal runs through a real neural network
+  (ONNX Runtime), inferred locally on your machine. No image, filename, or
+  metadata is ever sent anywhere.
 - **100% free & open source.** MIT-licensed, built on a free, open-source
   stack — no API keys, no paid tiers, no usage limits.
-- **Pick your model.** Choose from several background-removal models in
+- **Pick your AI model.** Choose from several background-removal models in
   Settings, trading off speed vs. accuracy. Each downloads once on first use
   (starting at ~43 MB for the default) and is cached locally after that.
 - **Offline after setup.** The only network requests the app ever makes are
@@ -48,7 +49,8 @@ PNG — happens in the Rust backend; the frontend never touches the network.
 Grab the installer for your platform from the
 [Releases](../../releases) page:
 
-- **macOS:** `.dmg`
+- **macOS:** `.dmg` (Apple Silicon only — the on-device ML runtime this app
+  depends on no longer ships prebuilt binaries for Intel Macs)
 - **Windows:** `.msi` / `.exe`
 - **Linux:** `.AppImage` / `.deb`
 
