@@ -29,10 +29,16 @@ pub struct SingleResult {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase", tag = "status")]
 pub enum BatchFileResult {
+    // `rename_all` on the enum itself only renames the tag value ("done"/"error");
+    // it does NOT cascade into each variant's own fields, so without this the
+    // frontend actually received `output_path`/`after_data_url` (snake_case) and
+    // silently read `undefined` for `outputPath`/`afterDataUrl`.
+    #[serde(rename_all = "camelCase")]
     Done {
         output_path: String,
         after_data_url: String,
     },
+    #[serde(rename_all = "camelCase")]
     Error {
         message: String,
     },
@@ -141,6 +147,29 @@ pub async fn remove_background_single(
             before_data_url,
             after_data_url,
         })
+    })
+    .await
+    .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Expands any directories in `paths` into their individual image files
+/// (see [`expand_paths`]), without processing anything. Lets the frontend
+/// render one row per file — with its original image as an immediate
+/// preview — before background removal has even started.
+#[tauri::command]
+pub async fn expand_batch_paths(paths: Vec<String>) -> Result<Vec<String>, String> {
+    expand_paths(&paths)
+}
+
+/// Reads an image straight off disk and returns it as a small preview data
+/// URL, with no processing. Used to show a batch row's "before" thumbnail
+/// immediately, while the real background-removal pass is still running.
+#[tauri::command]
+pub async fn preview_image(path: String) -> Result<String, String> {
+    let path = PathBuf::from(path);
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let original = image::open(&path).map_err(|e| format!("could not read image: {e}"))?;
+        to_data_url_sized(&original, BATCH_THUMB_MAX_DIM)
     })
     .await
     .map_err(|e| format!("background task failed: {e}"))?

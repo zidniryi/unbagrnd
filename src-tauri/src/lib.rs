@@ -24,6 +24,8 @@ pub fn run() {
             commands::clear_all_models,
             commands::remove_background_single,
             commands::remove_background_batch,
+            commands::expand_batch_paths,
+            commands::preview_image,
             system_usage::get_system_usage,
         ])
         .run(tauri::generate_context!())

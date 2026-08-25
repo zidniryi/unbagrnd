@@ -749,6 +749,7 @@ main {
 }
 
 .file-thumb {
+  position: relative;
   flex-shrink: 0;
   width: 34px;
   height: 34px;
@@ -774,6 +775,18 @@ main {
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
+}
+
+/* Overlaid on top of the "before" thumbnail while the real result is
+   still processing, so the row shows the original image instead of a
+   blank box, without hiding that it's not the final result yet. */
+.file-thumb-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface-alt) 55%, transparent);
 }
 
 .file-thumb-error {

@@ -535,14 +535,8 @@ batchResetBtn.addEventListener("click", () => {
 });
 
 batchRevealBtn.addEventListener("click", () => {
-  console.log("[reveal] lastBatchOutputDir =", lastBatchOutputDir);
   if (lastBatchOutputDir) {
-    revealItemInDir(lastBatchOutputDir)
-      .then(() => console.log("[reveal] succeeded"))
-      .catch((err) => {
-        console.error("[reveal] failed", err);
-        setStatus(String(err));
-      });
+    revealItemInDir(lastBatchOutputDir).catch((err) => setStatus(String(err)));
   }
 });
 
@@ -563,6 +557,26 @@ function renderBatchRow(fileName) {
   return { thumbEl, statusEl };
 }
 
+/**
+ * Shows the original image in `thumbEl` right away (with a spinner overlaid
+ * on top, since it's still just the "before" picture), so the row isn't
+ * blank while the real background-removal pass — which is much slower — is
+ * still running. Swapped out for the real result once that pass finishes.
+ */
+async function showBeforeThumb(thumbEl, path) {
+  try {
+    const dataUrl = await invoke("preview_image", { path });
+    if (thumbEl.dataset.settled) return; // already got the real result while this was loading
+    thumbEl.innerHTML = '<div class="file-thumb-overlay"><span class="file-thumb-spinner"></span></div>';
+    const img = document.createElement("img");
+    img.src = dataUrl;
+    img.alt = "";
+    thumbEl.prepend(img);
+  } catch {
+    // Non-critical: the row just keeps showing a spinner until the real result arrives.
+  }
+}
+
 async function processBatch(paths) {
   if (busy) return;
   setBusy(true);
@@ -577,16 +591,6 @@ async function processBatch(paths) {
 
   const unlisten = await listen("batch-progress", (event) => {
     const { index, total, fileName, status, outputPath, afterDataUrl, message } = event.payload;
-    document.body.insertAdjacentHTML(
-      "beforeend",
-      '<pre style="position:fixed;top:0;left:0;right:0;max-height:45vh;overflow:auto;background:#111;color:#0f0;font-size:11px;padding:8px;z-index:999;white-space:pre-wrap;word-break:break-all;">' +
-        `[batch-progress] index=${index} status=${status}\n` +
-        `outputPath=${outputPath}\n` +
-        `afterDataUrl type=${typeof afterDataUrl} length=${afterDataUrl ? afterDataUrl.length : "N/A"}\n` +
-        `afterDataUrl value=${afterDataUrl}\n` +
-        `message=${message}` +
-        "</pre>",
-    );
 
     let row = rowsByIndex[index];
     if (!row) {
@@ -595,6 +599,7 @@ async function processBatch(paths) {
     }
     const { thumbEl, statusEl } = row;
 
+    thumbEl.dataset.settled = "1";
     if (status === "done") {
       statusEl.textContent = "Done";
       statusEl.className = "file-status done";
@@ -620,10 +625,19 @@ async function processBatch(paths) {
 
   try {
     setStatus("Preparing…");
+    const expandedPaths = await invoke("expand_batch_paths", { paths });
+    for (const [index, filePath] of expandedPaths.entries()) {
+      const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+      const row = renderBatchRow(fileName);
+      rowsByIndex[index] = row;
+      showBeforeThumb(row.thumbEl, filePath);
+    }
+    batchProgressLabel.textContent = `0 / ${expandedPaths.length}`;
+
     await ensureModelReady(selectedModelKey);
 
     setStatus("Removing backgrounds…");
-    await invoke("remove_background_batch", { inputPaths: paths, outputDir, modelKey: selectedModelKey });
+    await invoke("remove_background_batch", { inputPaths: expandedPaths, outputDir, modelKey: selectedModelKey });
     setStatus("Batch complete.");
   } catch (err) {
     setStatus(`Failed: ${err}`);
