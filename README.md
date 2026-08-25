@@ -29,6 +29,7 @@ required after a one-time setup step.
   <img src="docs/screenshot-single.png" alt="unbagrnd single-image result" width="49%" />
 </p>
 <p align="center">
+  <img src="docs/screenshot-batch.png" alt="unbagrnd batch results" width="49%" />
   <img src="docs/screenshot-settings.png" alt="unbagrnd settings" width="49%" />
 </p>
 
