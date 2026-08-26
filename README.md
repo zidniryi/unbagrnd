@@ -4,6 +4,12 @@
 
 <h1 align="center">unbagrnd</h1>
 
+<p align="center">
+  <a href="../../releases"><img src="https://img.shields.io/github/v/release/zidniryi/unbagrnd?label=latest&style=flat-square&color=blue" alt="Latest release" /></a>
+  <a href="../../releases"><img src="https://img.shields.io/github/downloads/zidniryi/unbagrnd/total.svg?label=downloads&style=flat-square&color=brightgreen" alt="Total downloads" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/zidniryi/unbagrnd?style=flat-square&color=lightgrey" alt="License" /></a>
+</p>
+
 A small desktop app that uses AI to remove the background from images —
 entirely on your device. No cloud API, no account, no telemetry, and no
 internet access required after a one-time setup step.
@@ -57,6 +63,17 @@ Grab the installer for your platform from the
 On first launch, or the first time you remove a background, unbagrnd
 downloads the model (~170 MB) and shows a progress bar while it does. That
 only happens once — every run after that is fully offline.
+
+### macOS: "unbagrnd is damaged and can't be opened"
+
+This build isn't code-signed or notarized (that requires a paid Apple
+Developer account), so Gatekeeper quarantines it after download and shows
+this message — the app itself isn't actually damaged. Clear the quarantine
+flag once, after moving it to Applications:
+
+```sh
+xattr -cr /Applications/unbagrnd.app
+```
 
 ## Development
 
