@@ -42,8 +42,18 @@ internet access required after a one-time setup step.
 
 ## Videos
 
-- **Showcase:** [youtube.com/watch?v=Orb9cPrRR3U](https://www.youtube.com/watch?v=Orb9cPrRR3U)
-- **Demo:** [youtube.com/watch?v=22xLWuk1i_M](https://www.youtube.com/watch?v=22xLWuk1i_M)
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=Orb9cPrRR3U">
+    <img src="https://img.youtube.com/vi/Orb9cPrRR3U/maxresdefault.jpg" alt="unbagrnd showcase video" width="49%" />
+  </a>
+  <a href="https://www.youtube.com/watch?v=22xLWuk1i_M">
+    <img src="https://img.youtube.com/vi/22xLWuk1i_M/maxresdefault.jpg" alt="unbagrnd demo video" width="49%" />
+  </a>
+</p>
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=Orb9cPrRR3U">Showcase</a> ·
+  <a href="https://www.youtube.com/watch?v=22xLWuk1i_M">Demo</a>
+</p>
 
 ## How it works
 
