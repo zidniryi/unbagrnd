@@ -40,6 +40,11 @@ internet access required after a one-time setup step.
   <img src="docs/screenshot-settings.png" alt="unbagrnd settings" width="49%" />
 </p>
 
+## Videos
+
+- **Showcase:** [youtube.com/watch?v=Orb9cPrRR3U](https://www.youtube.com/watch?v=Orb9cPrRR3U)
+- **Demo:** [youtube.com/watch?v=22xLWuk1i_M](https://www.youtube.com/watch?v=22xLWuk1i_M)
+
 ## How it works
 
 unbagrnd runs [IS-Net "general use"](https://github.com/danielgatis/rembg)
