@@ -27,6 +27,11 @@ internet access required after a one-time setup step.
   checks.
 - **Single and batch.** Process one image, or a whole folder, from the same
   window.
+- **Refine by hand.** Brush over the result to erase or restore parts of the
+  cutout, with undo/redo — for the spots the model gets almost right.
+- **Edit the background.** Fill it with a solid color and add an on-device
+  drop shadow, no AI or network involved.
+- **Export as PNG, WebP, or SVG.** Pick the output format in Settings.
 - **Cross-platform.** macOS, Windows, and Linux.
 
 ## Screenshots
@@ -34,6 +39,10 @@ internet access required after a one-time setup step.
 <p align="center">
   <img src="docs/screenshot-landing.png" alt="unbagrnd main window" width="49%" />
   <img src="docs/screenshot-single.png" alt="unbagrnd single-image result" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/screenshot-refine.png" alt="unbagrnd refine editor" width="49%" />
+  <img src="docs/screenshot-background.png" alt="unbagrnd background editor" width="49%" />
 </p>
 <p align="center">
   <img src="docs/screenshot-batch.png" alt="unbagrnd batch results" width="49%" />

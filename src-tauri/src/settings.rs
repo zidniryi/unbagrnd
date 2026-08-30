@@ -8,12 +8,24 @@ use tauri::{AppHandle, Manager};
 
 use crate::models::{self, DEFAULT_MODEL_KEY};
 
+/// Formats background-removal output can be saved in (see
+/// [`crate::commands::write_output`]).
+pub const EXPORT_FORMATS: &[&str] = &["png", "svg", "webp"];
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Settings {
     pub selected_model: String,
     /// One of "system", "light", "dark".
     pub theme: String,
+    /// One of [`EXPORT_FORMATS`]. Controls the format background-removal
+    /// output is saved in (see [`crate::commands::write_output`]).
+    #[serde(default = "default_export_format")]
+    pub export_format: String,
+}
+
+fn default_export_format() -> String {
+    "png".to_string()
 }
 
 impl Default for Settings {
@@ -21,6 +33,7 @@ impl Default for Settings {
         Self {
             selected_model: DEFAULT_MODEL_KEY.to_string(),
             theme: "system".to_string(),
+            export_format: default_export_format(),
         }
     }
 }
@@ -48,6 +61,9 @@ pub fn load_settings(app: &AppHandle) -> Result<Settings, String> {
     }
     if !["system", "light", "dark"].contains(&settings.theme.as_str()) {
         settings.theme = "system".to_string();
+    }
+    if !EXPORT_FORMATS.contains(&settings.export_format.as_str()) {
+        settings.export_format = default_export_format();
     }
     Ok(settings)
 }
@@ -85,6 +101,18 @@ pub async fn set_theme(app: &AppHandle, theme: &str) -> Result<Settings, String>
     }
     let mut settings = load_settings(app)?;
     settings.theme = theme.to_string();
+    save(app, &settings).await?;
+    Ok(settings)
+}
+
+pub async fn set_export_format(app: &AppHandle, export_format: &str) -> Result<Settings, String> {
+    if !EXPORT_FORMATS.contains(&export_format) {
+        return Err(format!(
+            "unknown export format \"{export_format}\" (expected one of {EXPORT_FORMATS:?})"
+        ));
+    }
+    let mut settings = load_settings(app)?;
+    settings.export_format = export_format.to_string();
     save(app, &settings).await?;
     Ok(settings)
 }

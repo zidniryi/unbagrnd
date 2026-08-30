@@ -13,7 +13,7 @@
         <div class="brand-text">
           <div class="brand-name-row">
             <span class="brand-name"><span class="brand-name-initial">u</span>nbagrnd</span>
-            <span class="brand-version">0.1.0</span>
+            <span class="brand-version">0.2.0</span>
           </div>
           <p class="brand-tagline">AI-powered background removal — 100% on your device.</p>
         </div>
@@ -77,6 +77,8 @@
             <div class="result-actions">
               <span id="single-output-path" class="output-path"></span>
               <div class="result-buttons">
+                <button id="single-refine-btn" class="btn btn-secondary" type="button">Refine</button>
+                <button id="single-edit-bg-btn" class="btn btn-secondary" type="button">Edit background</button>
                 <button id="single-reveal-btn" class="btn btn-secondary" type="button">Reveal in folder</button>
                 <button id="single-reset-btn" class="btn btn-secondary" type="button">Process another</button>
               </div>
@@ -128,6 +130,144 @@
       </footer>
     </div>
 
+    <div id="refine-editor-overlay" class="bg-editor-overlay" hidden>
+      <div class="bg-editor">
+        <div class="bg-editor-topbar">
+          <button id="refine-done-btn" class="btn btn-secondary" type="button">Done</button>
+          <div class="bg-editor-topbar-center">
+            <button id="refine-undo-btn" class="btn-icon" type="button" title="Undo" disabled>↶</button>
+            <button id="refine-redo-btn" class="btn-icon" type="button" title="Redo" disabled>↷</button>
+          </div>
+          <button id="refine-download-btn" class="btn btn-primary" type="button">Download</button>
+        </div>
+        <div class="bg-editor-body">
+          <div class="bg-editor-canvas-wrap">
+            <div class="bg-editor-canvas checkerboard">
+              <canvas id="refine-canvas"></canvas>
+              <div id="refine-loading" class="bg-editor-loading" hidden>
+                <span class="spinner"></span>
+              </div>
+            </div>
+          </div>
+          <aside class="bg-editor-sidebar">
+            <h3>Refine</h3>
+            <div class="swatch-group">
+              <span class="swatch-group-label">Mode</span>
+              <div class="refine-mode-row" id="refine-mode-row">
+                <button type="button" class="bg-shadow-preset active" data-mode="erase">Erase</button>
+                <button type="button" class="bg-shadow-preset" data-mode="restore">Restore</button>
+              </div>
+            </div>
+            <p class="bg-editor-hint" id="refine-mode-hint">
+              Paint over parts of the subject you want to remove.
+            </p>
+
+            <label class="bg-shadow-opacity">
+              Brush size
+              <input type="range" id="refine-brush-size" min="1" max="40" value="10" />
+              <span id="refine-brush-size-label">10%</span>
+            </label>
+
+            <div class="bg-editor-divider"></div>
+
+            <div class="swatch-group" id="refine-restore-to-group" hidden>
+              <span class="swatch-group-label">Restore to</span>
+              <div class="refine-restore-row" id="refine-restore-row">
+                <button type="button" class="refine-restore-btn active" data-restore-to="original">
+                  <img id="refine-restore-original-thumb" alt="" />
+                  <span>Original</span>
+                </button>
+                <button type="button" class="refine-restore-btn" data-restore-to="start">
+                  <img id="refine-restore-start-thumb" alt="" />
+                  <span>Start</span>
+                </button>
+              </div>
+              <div class="bg-editor-divider"></div>
+            </div>
+
+            <div class="refine-actions">
+              <button id="refine-clear-btn" class="btn btn-link" type="button">Clear</button>
+              <button id="refine-apply-btn" class="btn btn-secondary" type="button">Apply</button>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div id="background-editor-overlay" class="bg-editor-overlay" hidden>
+      <div class="bg-editor">
+        <div class="bg-editor-topbar">
+          <button id="bg-editor-done-btn" class="btn btn-secondary" type="button">Done</button>
+          <button id="bg-editor-download-btn" class="btn btn-primary" type="button">Download</button>
+        </div>
+        <div class="bg-editor-body">
+          <div class="bg-editor-canvas-wrap">
+            <div class="bg-editor-canvas checkerboard">
+              <img id="bg-editor-preview" alt="Background preview" />
+              <div id="bg-editor-loading" class="bg-editor-loading" hidden>
+                <span class="spinner"></span>
+              </div>
+            </div>
+          </div>
+          <aside class="bg-editor-sidebar">
+            <h3>Background</h3>
+            <div class="swatch-group">
+              <span class="swatch-group-label">Basic colors</span>
+              <div class="swatch-row" id="bg-swatches-basic"></div>
+            </div>
+            <div class="swatch-group">
+              <span class="swatch-group-label">Pastels</span>
+              <div class="swatch-row" id="bg-swatches-pastel"></div>
+            </div>
+            <div class="swatch-group">
+              <span class="swatch-group-label">Neutrals</span>
+              <div class="swatch-row" id="bg-swatches-neutral"></div>
+            </div>
+            <div class="swatch-group" id="bg-swatches-image-group" hidden>
+              <span class="swatch-group-label">From your image</span>
+              <div class="swatch-row" id="bg-swatches-image"></div>
+            </div>
+
+            <div class="bg-editor-divider"></div>
+
+            <h3>Shadow</h3>
+            <p class="bg-editor-hint">
+              Adds a soft drop shadow beneath your subject, computed
+              on-device from its outline — no AI, no network.
+            </p>
+            <label class="bg-shadow-toggle">
+              <input type="checkbox" id="bg-shadow-enable" />
+              Enable drop shadow
+            </label>
+            <div id="bg-shadow-controls" class="bg-shadow-controls" hidden>
+              <div class="bg-shadow-presets" id="bg-shadow-presets">
+                <button type="button" class="bg-shadow-preset active" data-preset="natural">Natural</button>
+                <button type="button" class="bg-shadow-preset" data-preset="overhead">Overhead</button>
+                <button type="button" class="bg-shadow-preset" data-preset="left">Left</button>
+                <button type="button" class="bg-shadow-preset" data-preset="right">Right</button>
+                <button type="button" class="bg-shadow-preset" data-preset="custom">Custom</button>
+              </div>
+              <div id="bg-shadow-custom-controls" class="bg-shadow-custom" hidden>
+                <label>
+                  Angle
+                  <input type="range" id="bg-shadow-angle" min="0" max="359" value="0" />
+                </label>
+                <label>
+                  Distance
+                  <input type="range" id="bg-shadow-distance" min="0" max="30" value="8" />
+                </label>
+              </div>
+              <label class="bg-shadow-opacity">
+                Opacity
+                <input type="range" id="bg-shadow-opacity" min="0" max="100" value="50" />
+                <span id="bg-shadow-opacity-label">50%</span>
+              </label>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
     <div id="settings-overlay" class="settings-overlay" hidden>
       <div class="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
         <div class="settings-header">
@@ -145,6 +285,22 @@
                 <option value="dark">Dark</option>
               </select>
             </div>
+          </section>
+
+          <section class="settings-section">
+            <h3>Export</h3>
+            <div class="settings-row">
+              <span>Save output as</span>
+              <select id="export-format-select">
+                <option value="png">PNG</option>
+                <option value="webp">WebP</option>
+                <option value="svg">SVG</option>
+              </select>
+            </div>
+            <p class="settings-hint">
+              WebP is a smaller lossless file with the same transparency as
+              PNG. SVG wraps the result as a scalable, vector-embedded image.
+            </p>
           </section>
 
           <section class="settings-section">
