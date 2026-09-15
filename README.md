@@ -10,6 +10,13 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/zidniryi/unbagrnd?style=flat-square&color=lightgrey" alt="License" /></a>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white" alt="macOS" />
+  <img src="https://img.shields.io/badge/Windows-0078D6?style=flat-square&logo=windows&logoColor=white" alt="Windows" />
+  <img src="https://img.shields.io/badge/Linux-FCC624?style=flat-square&logo=linux&logoColor=black" alt="Linux" />
+  <img src="https://img.shields.io/badge/Android-3DDC84?style=flat-square&logo=android&logoColor=white" alt="Android" />
+</p>
+
 A small desktop app that uses AI to remove the background from images —
 entirely on your device. No cloud API, no account, no telemetry, and no
 internet access required after a one-time setup step.
@@ -140,20 +147,43 @@ Requires the Android SDK, an NDK, and JDK 17+ (`ANDROID_HOME` and
 ```sh
 npx tauri android init   # first time only, scaffolds gen/android
 npx tauri android dev    # run on a connected device/emulator, hot reload
-npx tauri android build --debug   # produces a debug APK
+npx tauri android build --target aarch64          # signed release APK
+npx tauri android build --target aarch64 --debug  # unsigned debug APK (huge - unstripped)
 ```
 
-The debug APK lands at
-`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
-There's no release-signing config yet, so `--debug` is currently the only
-supported build.
+The release APK lands at
+`src-tauri/gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk`.
+It's only installable if it's signed: generate a keystore once and point
+`src-tauri/gen/android/keystore.properties` at it (both are gitignored, and
+the build falls back to unsigned if the properties file is missing):
 
-The model download (`reqwest` over TLS) needs
-[`rustls-platform-verifier`](https://github.com/rustls/rustls-platform-verifier)
-explicitly initialized with the Android JVM context, or it panics on first
-use — see `init_rustls_platform_verifier` in `src-tauri/src/lib.rs` and the
-Gradle wiring for its bundled Kotlin/JNI component in
-`src-tauri/gen/android/app/build.gradle.kts`.
+```sh
+cd src-tauri/gen/android/app
+keytool -genkeypair -v -keystore unbagrnd-upload-key.jks -alias unbagrnd \
+  -keyalg RSA -keysize 2048 -validity 10000
+cat > ../keystore.properties <<EOF
+storeFile=unbagrnd-upload-key.jks
+storePassword=<the password you just set>
+keyAlias=unbagrnd
+keyPassword=<the same password - PKCS12 keystores don't support separate ones>
+EOF
+```
+
+Android's OS-native certificate verifier has a
+[known, unfixed bug](https://github.com/rustls/rustls-platform-verifier/issues/221)
+where it reports any CRL-only certificate (no OCSP URL — the norm since
+Let's Encrypt dropped OCSP support in 2025) as revoked, which broke the
+model download outright. Worked around in `models.rs`'s `http_client()`: on
+Android the download client is built with a bundled Mozilla root store
+instead of going through the platform verifier at all.
+
+Picked/dropped images can't be read with plain `std::fs` on Android: the
+file/photo picker hands back a `content://` URI, not a real filesystem
+path. `commands.rs`'s `open_image` goes through the `tauri-plugin-fs`
+plugin instead, which knows how to resolve those via the OS's
+ContentResolver. For the same reason, `output_path_for` can't always save
+"next to the source file" on Android (a content URI has no real parent
+directory) - it falls back to a directory inside the app's own storage.
 
 ### Running the Rust test suite
 
@@ -191,10 +221,13 @@ identifier (`com.unbagrnd.app`):
 | macOS   | `~/Library/Application Support/com.unbagrnd.app/`             |
 | Linux   | `~/.local/share/com.unbagrnd.app/`                             |
 | Windows | `%APPDATA%\com.unbagrnd.app\`                                  |
+| Android | `/data/user/0/com.unbagrnd.app/models/` (app-private storage) |
 
 To clear the cached model (freeing ~170 MB, or to force a clean re-download),
 delete that folder, or just the `isnet-general-use.onnx` file inside it. The
-app will re-download it the next time it's needed.
+app will re-download it the next time it's needed. On Android, that folder
+isn't user-browsable without root/`adb`, so use in-app Settings ("Clear
+model") instead, or just uninstall the app.
 
 ## Project structure
 

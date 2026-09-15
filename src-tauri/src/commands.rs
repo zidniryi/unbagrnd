@@ -8,6 +8,7 @@ use image::imageops::FilterType;
 use image::{DynamicImage, ImageFormat, RgbaImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+use tauri_plugin_fs::FsExt;
 
 use crate::background::{self, ShadowSpec};
 use crate::bg_remove::{self, InferenceState};
@@ -219,11 +220,11 @@ pub async fn remove_background_single(
     let spec = resolve_model(&app, model_key.as_deref())?;
     let format = resolve_export_format(&app, export_format.as_deref())?;
     let model_path = models::ensure_model(&app, spec).await?;
-    let input_path = PathBuf::from(input_path);
-    let output_path = output_path_for(&input_path, output_dir.as_deref(), "-nobg", &format)?;
+    let input_path_buf = PathBuf::from(&input_path);
+    let output_path = output_path_for(&app, &input_path_buf, output_dir.as_deref(), "-nobg", &format)?;
 
     tauri::async_runtime::spawn_blocking(move || -> Result<SingleResult, String> {
-        let original = open_image(&input_path)?;
+        let original = open_image(&app, &input_path)?;
         let before_data_url = to_data_url(&original)?;
 
         let inference = app.state::<InferenceState>();
@@ -238,7 +239,7 @@ pub async fn remove_background_single(
                 .lock()
                 .map_err(|_| "result state lock was poisoned".to_string())?;
             *guard = Some(ResultSession {
-                input_path: input_path.clone(),
+                input_path: input_path_buf.clone(),
                 original: original.to_rgba8(),
                 start: after.clone(),
                 current: after.clone(),
@@ -272,10 +273,9 @@ pub async fn expand_batch_paths(paths: Vec<String>) -> Result<Vec<String>, Strin
 /// URL, with no processing. Used to show a batch row's "before" thumbnail
 /// immediately, while the real background-removal pass is still running.
 #[tauri::command]
-pub async fn preview_image(path: String) -> Result<String, String> {
-    let path = PathBuf::from(path);
+pub async fn preview_image(app: AppHandle, path: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let original = open_image(&path)?;
+        let original = open_image(&app, &path)?;
         to_data_url_sized(&original, BATCH_THUMB_MAX_DIM)
     })
     .await
@@ -320,7 +320,7 @@ pub async fn export_background(
     let format = resolve_export_format(&app, export_format.as_deref())?;
     let session = last_session(&app)?;
     let (input_path, image) = (session.input_path, session.current);
-    let output_path = output_path_for(&input_path, output_dir.as_deref(), "-bg", &format)?;
+    let output_path = output_path_for(&app, &input_path, output_dir.as_deref(), "-bg", &format)?;
 
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let composited = background::composite(&image, background_hex.as_deref(), shadow.as_ref())?;
@@ -445,7 +445,7 @@ pub async fn export_refine(
 ) -> Result<String, String> {
     let format = resolve_export_format(&app, export_format.as_deref())?;
     let session = last_session(&app)?;
-    let output_path = output_path_for(&session.input_path, output_dir.as_deref(), "-refined", &format)?;
+    let output_path = output_path_for(&app, &session.input_path, output_dir.as_deref(), "-refined", &format)?;
 
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         write_output(&session.current, &output_path, &format)?;
@@ -486,12 +486,13 @@ pub async fn remove_background_batch(
             let model_path = model_path.clone();
             let output_dir = output_dir.clone();
             let input_path = input_path.clone();
+            let raw_input_path = raw_input_path.clone();
             let format = format.clone();
             let outcome = tauri::async_runtime::spawn_blocking(
                 move || -> Result<(PathBuf, String), String> {
                     let output_path =
-                        output_path_for(&input_path, output_dir.as_deref(), "-nobg", &format)?;
-                    let original = open_image(&input_path)?;
+                        output_path_for(&app, &input_path, output_dir.as_deref(), "-nobg", &format)?;
+                    let original = open_image(&app, &raw_input_path)?;
                     let inference = app.state::<InferenceState>();
                     let after = bg_remove::remove_background(
                         inference.inner(),
@@ -579,6 +580,7 @@ fn expand_paths(paths: &[String]) -> Result<Vec<String>, String> {
 /// background editor, and `format` is one of [`settings::EXPORT_FORMATS`],
 /// as validated by [`resolve_export_format`].
 fn output_path_for(
+    app: &AppHandle,
     input_path: &Path,
     output_dir: Option<&str>,
     suffix: &str,
@@ -592,27 +594,56 @@ fn output_path_for(
 
     let dir = match output_dir {
         Some(dir) => PathBuf::from(dir),
-        None => input_path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from(".")),
+        None => match input_path.parent() {
+            // A real, existing directory next to the source file - the
+            // normal desktop case.
+            Some(p) if p.as_os_str() != "" && p.is_dir() => p.to_path_buf(),
+            // Either there's no real parent directory at all, or (Android)
+            // `input_path` was actually a `content://` URI, which Rust's
+            // `Path` happily parses into nonsense segments that don't
+            // correspond to any real, writable location. Fall back to a
+            // directory inside the app's own storage, which is always
+            // writable without extra permissions.
+            _ => {
+                let dir = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|e| format!("could not resolve a save directory: {e}"))?
+                    .join("exports");
+                std::fs::create_dir_all(&dir)
+                    .map_err(|e| format!("could not create the exports directory: {e}"))?;
+                dir
+            }
+        },
     };
 
     Ok(dir.join(file_name))
 }
 
-/// Decodes an image file by sniffing its actual content rather than
-/// trusting its extension. Browsers and chat apps routinely save images
+/// Reads an image file's raw bytes, then decodes them.
+///
+/// Goes through the `fs` plugin rather than `std::fs` directly because on
+/// Android, the file/photo picker hands back a `content://` URI rather than
+/// a real filesystem path - only the plugin (via the OS's ContentResolver)
+/// knows how to turn that into bytes.
+fn open_image(app: &AppHandle, raw_path: &str) -> Result<DynamicImage, String> {
+    let file_path: tauri_plugin_fs::FilePath = raw_path
+        .parse()
+        .unwrap_or_else(|e: std::convert::Infallible| match e {});
+    let bytes = app
+        .fs()
+        .read(file_path)
+        .map_err(|e| format!("could not read image: {e}"))?;
+    decode_image_bytes(&bytes)
+}
+
+/// Decodes image bytes by sniffing their actual content rather than
+/// trusting a file extension. Browsers and chat apps routinely save images
 /// with a mismatched extension (a WebP saved as `.jpg` is common), and
 /// `image::open`'s extension-based guess fails outright on those with a
 /// confusing decoder error instead of just reading the file.
-fn open_image(path: &Path) -> Result<DynamicImage, String> {
-    image::ImageReader::open(path)
-        .map_err(|e| format!("could not read image: {e}"))?
-        .with_guessed_format()
-        .map_err(|e| format!("could not read image: {e}"))?
-        .decode()
-        .map_err(|e| format!("could not read image: {e}"))
+fn decode_image_bytes(bytes: &[u8]) -> Result<DynamicImage, String> {
+    image::load_from_memory(bytes).map_err(|e| format!("could not read image: {e}"))
 }
 
 /// Writes the background-removed image to `path` in `format` (one of
@@ -738,14 +769,15 @@ mod tests {
     fn open_image_sniffs_content_instead_of_trusting_a_mismatched_extension() {
         // Chat apps and browsers routinely save images under an extension
         // that doesn't match their actual encoding (a WebP saved as
-        // `.jpg` is common). `open_image` must decode by the real magic
-        // bytes, not fail the way `image::open`'s extension-based guess
-        // does on a file like this.
+        // `.jpg` is common). `decode_image_bytes` must decode by the real
+        // magic bytes, not fail the way `image::open`'s extension-based
+        // guess does on a file like this.
         let path = TempPath::new("actually-webp.jpg");
         let image = sample_image();
         image.save_with_format(&path.0, ImageFormat::WebP).unwrap();
 
-        let decoded = open_image(&path.0).unwrap().to_rgba8();
+        let bytes = std::fs::read(&path.0).unwrap();
+        let decoded = decode_image_bytes(&bytes).unwrap().to_rgba8();
         assert_eq!(decoded, image);
     }
 

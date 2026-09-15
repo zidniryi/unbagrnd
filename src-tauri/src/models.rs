@@ -6,12 +6,42 @@
 //! Every call after that reads the cached file straight from disk.
 
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use futures_util::StreamExt;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
+
+/// The client used for the one-time model download.
+///
+/// On every platform except Android this is just `reqwest`'s defaults
+/// (OS-native certificate verification). On Android it's built with a
+/// bundled Mozilla root store instead - see the comment on the
+/// `target_os = "android"` dependencies in Cargo.toml for why.
+fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        let builder = reqwest::Client::builder();
+
+        #[cfg(target_os = "android")]
+        let builder = {
+            let mut roots = rustls::RootCertStore::empty();
+            roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+            let tls_config = rustls::ClientConfig::builder_with_provider(std::sync::Arc::new(
+                rustls::crypto::aws_lc_rs::default_provider(),
+            ))
+            .with_safe_default_protocol_versions()
+            .expect("rustls default protocol versions are always valid")
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+            builder.use_preconfigured_tls(tls_config)
+        };
+
+        builder.build().expect("failed to build the HTTP client")
+    })
+}
 
 /// How a model's raw output tensor should be turned into an alpha mask.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -220,7 +250,9 @@ pub async fn ensure_model(app: &AppHandle, spec: &ModelSpec) -> Result<PathBuf, 
 
     let tmp_path = dir.join(format!("{}.part", spec.file_name));
 
-    let response = reqwest::get(spec.url)
+    let response = http_client()
+        .get(spec.url)
+        .send()
         .await
         .map_err(|e| format!("model download failed: {e}"))?;
     if !response.status().is_success() {

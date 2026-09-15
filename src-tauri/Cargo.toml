@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd"
-version = "0.3.0"
+version = "0.3.1"
 description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
 authors = ["zidniryi"]
 license = "MIT"
@@ -23,6 +23,11 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# Reading picked/dropped image files. On desktop this is a thin wrapper
+# around std::fs; on Android it's required - the file picker returns
+# `content://` URIs, not real filesystem paths, and only this plugin knows
+# how to resolve those (via the OS's ContentResolver) into readable bytes.
+tauri-plugin-fs = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -54,13 +59,17 @@ base64 = "0.23"
 # System-wide CPU/RAM usage shown in the footer.
 sysinfo = "0.33"
 
-# Android needs rustls-platform-verifier explicitly initialized with the JVM
-# context before any TLS connection (reqwest's model download) is attempted,
-# otherwise it panics - see lib.rs's `init_rustls_platform_verifier`. This
-# pulls in its own `jni` major version, separate from the one wry/tao use.
+# Android's OS-native certificate verifier (what reqwest uses by default via
+# rustls-platform-verifier) has a currently-unfixed upstream bug: it reports
+# any CRL-only certificate (no OCSP URL - now the norm since Let's Encrypt
+# dropped OCSP support in 2025) as Revoked even when it's perfectly valid.
+# https://github.com/rustls/rustls-platform-verifier/issues/221
+# Worked around in models.rs by building the download client with a bundled
+# Mozilla root store on Android instead, sidestepping OS revocation checking
+# entirely rather than going through the platform verifier at all.
 [target.'cfg(target_os = "android")'.dependencies]
-rustls-platform-verifier = "0.7"
-jni = "0.22"
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "tls12"] }
+webpki-roots = "0.26"
 
 [profile.release]
 panic = "abort"
