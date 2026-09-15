@@ -4888,15 +4888,17 @@ dependencies = [
 
 [[package]]
 name = "unbagrnd"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "futures-util",
  "hex",
  "image",
+ "jni 0.22.4",
  "ndarray",
  "ort",
  "reqwest",
+ "rustls-platform-verifier",
  "serde",
  "serde_json",
  "sha2 0.11.0",

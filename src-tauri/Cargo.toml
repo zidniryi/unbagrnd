@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd"
-version = "0.2.0"
+version = "0.3.0"
 description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
 authors = ["zidniryi"]
 license = "MIT"
@@ -53,6 +53,14 @@ base64 = "0.23"
 
 # System-wide CPU/RAM usage shown in the footer.
 sysinfo = "0.33"
+
+# Android needs rustls-platform-verifier explicitly initialized with the JVM
+# context before any TLS connection (reqwest's model download) is attempted,
+# otherwise it panics - see lib.rs's `init_rustls_platform_verifier`. This
+# pulls in its own `jni` major version, separate from the one wry/tao use.
+[target.'cfg(target_os = "android")'.dependencies]
+rustls-platform-verifier = "0.7"
+jni = "0.22"
 
 [profile.release]
 panic = "abort"

@@ -32,7 +32,7 @@ internet access required after a one-time setup step.
 - **Edit the background.** Fill it with a solid color and add an on-device
   drop shadow, no AI or network involved.
 - **Export as PNG, WebP, or SVG.** Pick the output format in Settings.
-- **Cross-platform.** macOS, Windows, and Linux.
+- **Cross-platform.** macOS, Windows, Linux, and Android.
 
 ## Screenshots
 
@@ -47,6 +47,10 @@ internet access required after a one-time setup step.
 <p align="center">
   <img src="docs/screenshot-batch.png" alt="unbagrnd batch results" width="49%" />
   <img src="docs/screenshot-settings.png" alt="unbagrnd settings" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/screenshot-android-home.png" alt="unbagrnd on Android" width="49%" />
+  <img src="docs/screenshot-android-picker.png" alt="unbagrnd Android native photo picker" width="49%" />
 </p>
 
 ## Videos
@@ -83,6 +87,8 @@ Grab the installer for your platform from the
   depends on no longer ships prebuilt binaries for Intel Macs)
 - **Windows:** `.msi` / `.exe`
 - **Linux:** `.AppImage` / `.deb`
+- **Android:** not yet in the automated release pipeline — build the APK
+  yourself, see [Android](#android) below.
 
 On first launch, or the first time you remove a background, unbagrnd
 downloads the model (~170 MB) and shows a progress bar while it does. That
@@ -125,6 +131,29 @@ npm run tauri build
 
 Produces a native installer for your current OS in
 `src-tauri/target/release/bundle/`.
+
+### Android
+
+Requires the Android SDK, an NDK, and JDK 17+ (`ANDROID_HOME` and
+`NDK_HOME` set), on top of the prerequisites above:
+
+```sh
+npx tauri android init   # first time only, scaffolds gen/android
+npx tauri android dev    # run on a connected device/emulator, hot reload
+npx tauri android build --debug   # produces a debug APK
+```
+
+The debug APK lands at
+`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`.
+There's no release-signing config yet, so `--debug` is currently the only
+supported build.
+
+The model download (`reqwest` over TLS) needs
+[`rustls-platform-verifier`](https://github.com/rustls/rustls-platform-verifier)
+explicitly initialized with the Android JVM context, or it panics on first
+use — see `init_rustls_platform_verifier` in `src-tauri/src/lib.rs` and the
+Gradle wiring for its bundled Kotlin/JNI component in
+`src-tauri/gen/android/app/build.gradle.kts`.
 
 ### Running the Rust test suite
 
