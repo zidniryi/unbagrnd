@@ -231,6 +231,7 @@ pub async fn remove_background_single(
         let after =
             bg_remove::remove_background(inference.inner(), spec, &model_path, &original)?;
         write_output(&after, &output_path, &format)?;
+        publish_to_gallery(&app, &output_path, &format);
 
         {
             let result_state = app.state::<LastResultState>();
@@ -325,6 +326,7 @@ pub async fn export_background(
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let composited = background::composite(&image, background_hex.as_deref(), shadow.as_ref())?;
         write_output(&composited, &output_path, &format)?;
+        publish_to_gallery(&app, &output_path, &format);
         Ok(output_path.display().to_string())
     })
     .await
@@ -449,10 +451,31 @@ pub async fn export_refine(
 
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         write_output(&session.current, &output_path, &format)?;
+        publish_to_gallery(&app, &output_path, &format);
         Ok(output_path.display().to_string())
     })
     .await
     .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Opens the most recently exported image in the system photo viewer.
+///
+/// This exists only as the Android fallback for the "reveal in folder"
+/// buttons: `tauri-plugin-opener`'s `revealItemInDir` is unimplemented on
+/// Android (it returns an error there), so the frontend calls this command
+/// when that fails. It's a no-op error on every other platform, since
+/// `revealItemInDir` already works there and this is never reached.
+#[tauri::command]
+pub async fn reveal_last_export_in_gallery(app: AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::android_gallery::open_last_in_gallery(&app)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Err("not supported on this platform".to_string())
+    }
 }
 
 /// Removes the background from every image in `input_paths`, one at a
@@ -501,6 +524,7 @@ pub async fn remove_background_batch(
                         &original,
                     )?;
                     write_output(&after, &output_path, &format)?;
+                    publish_to_gallery(&app, &output_path, &format);
                     let after_data_url =
                         to_data_url_sized(&DynamicImage::ImageRgba8(after), BATCH_THUMB_MAX_DIM)?;
                     Ok((output_path, after_data_url))
@@ -685,6 +709,39 @@ fn write_output(image: &RgbaImage, path: &Path, format: &str) -> Result<(), Stri
             .map_err(|e| format!("could not write output image: {e}")),
     }
 }
+
+/// On Android, additionally publishes the file just written at `path` into
+/// the shared `Pictures/unbagrnd` gallery collection, so it shows up in
+/// Gallery/Photos without the user having to go digging through the app's
+/// private storage for it - see `android_gallery` for why that's needed at
+/// all. A no-op on every other platform, where writing next to the source
+/// file (or into the user's chosen folder) is already enough.
+///
+/// Best-effort: failures are logged and otherwise swallowed rather than
+/// failing the export, since the file itself was already written
+/// successfully regardless of whether this extra publish step succeeds.
+/// "svg" is skipped - it's not a photo Gallery apps know how to render.
+#[cfg(target_os = "android")]
+fn publish_to_gallery(app: &AppHandle, path: &Path, format: &str) {
+    if format == "svg" {
+        return;
+    }
+    let mime_type = if format == "webp" { "image/webp" } else { "image/png" };
+    let Some(display_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            if let Err(e) = crate::android_gallery::publish(app, display_name, mime_type, &bytes) {
+                eprintln!("could not publish exported image to the gallery: {e}");
+            }
+        }
+        Err(e) => eprintln!("could not read exported image back for the gallery: {e}"),
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn publish_to_gallery(_app: &AppHandle, _path: &Path, _format: &str) {}
 
 fn to_data_url(img: &DynamicImage) -> Result<String, String> {
     to_data_url_sized(img, PREVIEW_MAX_DIM)

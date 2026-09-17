@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd"
-version = "0.3.1"
+version = "0.3.3"
 description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
 authors = ["zidniryi"]
 license = "MIT"

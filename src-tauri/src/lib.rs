@@ -1,3 +1,5 @@
+#[cfg(target_os = "android")]
+mod android_gallery;
 mod background;
 mod bg_remove;
 mod commands;
@@ -12,10 +14,16 @@ use system_usage::SystemUsageState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_fs::init());
+    #[cfg(target_os = "android")]
+    {
+        builder = builder.plugin(android_gallery::init());
+    }
+    builder
         .manage(InferenceState::new())
         .manage(SystemUsageState::new())
         .manage(LastResultState::new())
@@ -39,6 +47,7 @@ pub fn run() {
             commands::undo_refine,
             commands::redo_refine,
             commands::export_refine,
+            commands::reveal_last_export_in_gallery,
             system_usage::get_system_usage,
         ])
         .run(tauri::generate_context!())

@@ -528,7 +528,11 @@ singleResetBtn.addEventListener("click", () => {
 
 singleRevealBtn.addEventListener("click", () => {
   if (lastSingleOutputPath) {
-    revealItemInDir(lastSingleOutputPath).catch((err) => setStatus(String(err)));
+    revealItemInDir(lastSingleOutputPath).catch(() => {
+      // Unsupported on Android - open the exported photo in the gallery
+      // app instead, since there's no "reveal in folder" there anyway.
+      invoke("reveal_last_export_in_gallery").catch((err) => setStatus(String(err)));
+    });
   }
 });
 
@@ -1212,7 +1216,11 @@ batchResetBtn.addEventListener("click", () => {
 
 batchRevealBtn.addEventListener("click", () => {
   if (lastBatchOutputDir) {
-    revealItemInDir(lastBatchOutputDir).catch((err) => setStatus(String(err)));
+    revealItemInDir(lastBatchOutputDir).catch(() => {
+      // Unsupported on Android - fall back to opening the last exported
+      // photo in the gallery app instead of its (inaccessible) folder.
+      invoke("reveal_last_export_in_gallery").catch((err) => setStatus(String(err)));
+    });
   }
 });
 

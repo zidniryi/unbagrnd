@@ -1,6 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Only needed on Android 9 (API 28) and below: MediaStore.insert()
+         without a RELATIVE_PATH/IS_PENDING (the pre-scoped-storage API)
+         needs this to write into Pictures/. Android 10+ (API 29+, where the
+         app writes gallery images via the scoped-storage path instead)
+         doesn't require it at all, hence maxSdkVersion. -->
+    <uses-permission
+      android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+      android:maxSdkVersion="28" />
 
     <!-- AndroidTV support -->
     <uses-feature android:name="android.software.leanback" android:required="false" />

@@ -903,7 +903,7 @@ main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 20px;
+  padding: max(14px, env(safe-area-inset-top)) 20px 14px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
