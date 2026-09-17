@@ -54,7 +54,10 @@ jobs:
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: "./src-tauri -> target"
+          # Restructured into a Cargo workspace (root Cargo.toml), so the
+          # build output now lives at the repo root's `target/`, not
+          # `src-tauri/target/`.
+          workspaces: ". -> target"
 
       - name: install frontend dependencies
         run: npm ci
@@ -73,6 +76,90 @@ jobs:
             no account, and no telemetry. Pick from several background-removal
             models in Settings; each one downloads once on first use (starting
             at ~43 MB for the default) and is cached locally after that.
+
+            Android: see the `.apk`/`.aab` assets below (debug-signed, fine for
+            sideloading - see the README for how to install them).
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  build-android:
+    needs: publish-tauri
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: "npm"
+
+      - name: setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: install Android NDK
+        run: |
+          sdkmanager --install "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: install Rust stable with Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - name: install frontend dependencies
+        run: npm ci
+
+      # Produces a debug-signed (Android's default debug keystore) APK/AAB:
+      # installable for sideloading, but not suitable for the Play Store,
+      # which would need a real release-signing keystore configured as a
+      # secret. `gen/android` is already committed to the repo, so this
+      # runs directly - no `tauri android init` needed.
+      - name: build Android APK/AAB
+        run: npx tauri android build --debug
+
+      - name: locate build outputs
+        id: outputs
+        run: |
+          apk=$(find src-tauri/gen/android -name "*.apk" | head -n1)
+          aab=$(find src-tauri/gen/android -name "*.aab" | head -n1)
+          cp "$apk" "unbagrnd-${{ github.ref_name }}-android.apk"
+          cp "$aab" "unbagrnd-${{ github.ref_name }}-android.aab"
+
+      - name: upload Android build to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          draft: true
+          files: |
+            unbagrnd-${{ github.ref_name }}-android.apk
+            unbagrnd-${{ github.ref_name }}-android.aab

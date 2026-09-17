@@ -15,6 +15,16 @@ const IMAGE_FILTERS = [
 // Models at or above this size get a confirmation dialog before downloading.
 const LARGE_MODEL_THRESHOLD = 100 * 1024 * 1024;
 
+// Android has no folder-picker: `tauri-plugin-dialog`'s `open({ directory:
+// true })` always rejects there (`FolderPickerNotImplemented` - there's no
+// Storage Access Framework tree-picker wired up), and scoped storage means
+// an arbitrary chosen folder usually isn't even writable via a plain path
+// anyway. Exports already auto-publish to the Gallery on Android
+// regardless (see the Rust `publish_to_gallery` export path), so the
+// custom-output-folder UI is simply hidden there instead of silently
+// failing when tapped.
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+
 const $ = (id) => document.getElementById(id);
 
 // ---- Shared elements ----
@@ -493,17 +503,27 @@ tabBatch.addEventListener("click", () => activateTab("batch"));
 // ---------------------------------------------------------------------
 
 function refreshOutputDirDisplay() {
-  outputDirDisplay.textContent = outputDir ?? "Same folder as the original image";
+  outputDirDisplay.textContent = IS_ANDROID
+    ? "Saved next to the source photo, and to your Gallery"
+    : (outputDir ?? "Same folder as the original image");
   clearOutputDirBtn.hidden = outputDir === null;
 }
 
-chooseOutputDirBtn.addEventListener("click", async () => {
-  const picked = await open({ multiple: false, directory: true });
-  if (picked) {
-    outputDir = picked;
-    refreshOutputDirDisplay();
-  }
-});
+if (IS_ANDROID) {
+  chooseOutputDirBtn.hidden = true;
+} else {
+  chooseOutputDirBtn.addEventListener("click", async () => {
+    try {
+      const picked = await open({ multiple: false, directory: true });
+      if (picked) {
+        outputDir = picked;
+        refreshOutputDirDisplay();
+      }
+    } catch (err) {
+      setStatus(String(err));
+    }
+  });
+}
 
 clearOutputDirBtn.addEventListener("click", () => {
   outputDir = null;
