@@ -77,8 +77,9 @@ jobs:
             models in Settings; each one downloads once on first use (starting
             at ~43 MB for the default) and is cached locally after that.
 
-            Android: see the `.apk`/`.aab` assets below (debug-signed, fine for
-            sideloading - see the README for how to install them).
+            Android: see the `.apk`/`.aab` assets below - release-signed, so
+            it upgrades in-place over any previous version (see the README
+            for how to install).
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
@@ -147,13 +148,30 @@ jobs:
       - name: install frontend dependencies
         run: npm ci
 
-      # Produces a debug-signed (Android's default debug keystore) APK/AAB:
-      # installable for sideloading, but not suitable for the Play Store,
-      # which would need a real release-signing keystore configured as a
-      # secret. `gen/android` is already committed to the repo, so this
-      # runs directly - no `tauri android init` needed.
+      # Restores the same upload keystore every release is signed with -
+      # required for a release build to be installable at all, and for
+      # anyone with a previous version already installed to upgrade
+      # in-place instead of hitting a signature-mismatch install error.
+      - name: decode Android signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          keystore_path="$RUNNER_TEMP/unbagrnd-upload-key.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore_path"
+          cat > src-tauri/gen/android/keystore.properties <<EOF
+          storeFile=$keystore_path
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      # A signed release build: optimized and stripped (tens of MB, not the
+      # ~260 MB an unstripped --debug build produces), and installable
+      # because of the keystore step above.
+      # `gen/android` is already committed to the repo, so this runs
+      # directly - no `tauri android init` needed.
       - name: build Android APK/AAB
-        run: npx tauri android build --target aarch64 --debug
+        run: npx tauri android build --target aarch64
 
       - name: locate build outputs
         id: outputs

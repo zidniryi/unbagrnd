@@ -94,8 +94,9 @@ Grab the installer for your platform from the
   depends on no longer ships prebuilt binaries for Intel Macs)
 - **Windows:** `.msi` / `.exe`
 - **Linux:** `.AppImage` / `.deb`
-- **Android:** `.apk` / `.aab` (debug-signed — fine for sideloading, see
-  [Android](#android) below for a release-signed build)
+- **Android:** `.apk` / `.aab` — release-signed, installs and upgrades
+  in-place like any other app (see [Android](#android) below for building
+  one yourself)
 
 On first launch, or the first time you remove a background, unbagrnd
 downloads the model (~170 MB) and shows a progress bar while it does. That
@@ -141,10 +142,10 @@ Produces a native installer for your current OS in
 
 ### Android
 
-Every tagged release already ships a debug-signed `.apk`/`.aab` (see
-[Releases](../../releases)) — good enough for sideloading. Build one
-yourself only if you need a release-signed build or want to develop
-against a connected device/emulator. Requires the Android SDK, an NDK, and
+Every tagged release already ships a release-signed `.apk`/`.aab` (see
+[Releases](../../releases)) — installs and upgrades in-place like any
+other app. Build one yourself only if you want to develop against a
+connected device/emulator. Requires the Android SDK, an NDK, and
 JDK 17+ (`ANDROID_HOME` and `NDK_HOME` set), on top of the prerequisites
 above:
 
