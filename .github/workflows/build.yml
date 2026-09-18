@@ -119,6 +119,11 @@ jobs:
 
       - name: setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's own default ("tools platform-tools") fails outright -
+          # Google removed the legacy "tools" package from the SDK repository,
+          # so `sdkmanager tools` exits 1 before platform-tools ever installs.
+          packages: platform-tools
 
       - name: install Android NDK
         run: |
