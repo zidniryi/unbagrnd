@@ -134,7 +134,10 @@ jobs:
       - name: install Rust stable with Android targets
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          # aarch64 only - matches the --target aarch64 build below. `ort`'s
+          # prebuilt ONNX Runtime binaries don't cover armv7-linux-androideabi
+          # at all, and virtually every real Android device is arm64 anyway.
+          targets: aarch64-linux-android
 
       - name: Rust build cache
         uses: swatinem/rust-cache@v2
@@ -150,7 +153,7 @@ jobs:
       # secret. `gen/android` is already committed to the repo, so this
       # runs directly - no `tauri android init` needed.
       - name: build Android APK/AAB
-        run: npx tauri android build --debug
+        run: npx tauri android build --target aarch64 --debug
 
       - name: locate build outputs
         id: outputs
