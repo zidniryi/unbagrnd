@@ -1,0 +1,25 @@
+# Frontend / desktop app - not needed to build unbagrnd-api.
+node_modules
+dist
+dist-ssr
+src
+src-tauri/gen
+src-tauri/icons
+src-tauri/target
+
+# Build artifacts (Docker rebuilds these fresh).
+target
+**/target
+
+# VCS / editor / misc.
+.git
+.github
+.vscode
+.idea
+.DS_Store
+*.log
+
+# Never ship local secrets or a local database into the build context.
+.env
+*.db
+data

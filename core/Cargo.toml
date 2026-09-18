@@ -1,0 +1,44 @@
+[package]
+name = "unbagrnd-core"
+version = "0.4.0"
+description = "Shared on-device background-removal inference core for unbagrnd: model catalog, model download/caching, and ONNX Runtime inference. Used by both the Tauri desktop app and the self-hosted REST API."
+authors = ["zidniryi"]
+license = "MIT"
+repository = "https://github.com/unbagrnd/unbagrnd"
+edition = "2021"
+
+[dependencies]
+# ONNX Runtime inference. Pinned to an exact rc so the API this crate is
+# written against doesn't drift out from under it - the 2.0 API has changed
+# between rc releases. `download-binaries` and `ndarray` are already on by
+# default for this crate, but are named explicitly here so the intent is
+# obvious to readers of this file.
+ort = { version = "=2.0.0-rc.13", default-features = true, features = ["download-binaries", "ndarray"] }
+ndarray = "0.17"
+
+# Image decode/resize/encode.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff", "gif"] }
+
+serde = { version = "1", features = ["derive"] }
+
+# One-time model download. Default features already select the rustls TLS
+# backend (no system OpenSSL needed on Linux CI runners).
+reqwest = { version = "0.13", default-features = false, features = ["default-tls", "stream"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt", "fs", "io-util"] }
+
+# Integrity check on the downloaded model file.
+sha2 = "0.11"
+hex = "0.4"
+
+# Android's OS-native certificate verifier (what reqwest uses by default via
+# rustls-platform-verifier) has a currently-unfixed upstream bug: it reports
+# any CRL-only certificate (no OCSP URL - now the norm since Let's Encrypt
+# dropped OCSP support in 2025) as Revoked even when it's perfectly valid.
+# https://github.com/rustls/rustls-platform-verifier/issues/221
+# Worked around by building the download client with a bundled Mozilla root
+# store on Android instead, sidestepping OS revocation checking entirely
+# rather than going through the platform verifier at all.
+[target.'cfg(target_os = "android")'.dependencies]
+rustls = { version = "0.23", default-features = false, features = ["aws-lc-rs", "tls12"] }
+webpki-roots = "0.26"

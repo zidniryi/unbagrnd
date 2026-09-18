@@ -9,9 +9,9 @@ use image::{DynamicImage, ImageFormat, RgbaImage};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
+use unbagrnd_core::bg_remove::{self, InferenceState};
 
 use crate::background::{self, ShadowSpec};
-use crate::bg_remove::{self, InferenceState};
 use crate::models::{self, ModelInfo, ModelSpec};
 use crate::refine::{self, Stroke};
 use crate::settings::{self, Settings};

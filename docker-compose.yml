@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unbagrnd-api
+    ports:
+      - "${PORT:-8080}:8080"
+    env_file:
+      - .env
+    environment:
+      # Overridable via .env; these are the in-container paths the named
+      # volumes below are mounted at, so they should generally stay as-is.
+      DATABASE_URL: sqlite:///data/unbagrnd.db
+      UNBAGRND_MODELS_DIR: /models
+    volumes:
+      - unbagrnd-data:/data
+      - unbagrnd-models:/models
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  unbagrnd-data:
+  unbagrnd-models:

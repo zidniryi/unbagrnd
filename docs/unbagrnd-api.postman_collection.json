@@ -1,0 +1,101 @@
+{
+  "info": {
+    "name": "unbagrnd API",
+    "description": "Self-hosted, on-device background removal over HTTP. See the README's \"## API\" section for full docs, or GET {{base_url}}/docs for interactive Swagger UI.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8080" },
+    { "key": "admin_key", "value": "" },
+    { "key": "api_key", "value": "" },
+    { "key": "key_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Health",
+      "request": {
+        "method": "GET",
+        "url": "{{base_url}}/health"
+      }
+    },
+    {
+      "name": "Keys",
+      "item": [
+        {
+          "name": "Create API key",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-Admin-Key", "value": "{{admin_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"my-production-key\"\n}"
+            },
+            "url": "{{base_url}}/v1/keys"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const body = pm.response.json();",
+                  "  pm.collectionVariables.set('api_key', body.api_key);",
+                  "  pm.collectionVariables.set('key_id', body.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List API keys",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-Admin-Key", "value": "{{admin_key}}" }],
+            "url": "{{base_url}}/v1/keys"
+          }
+        },
+        {
+          "name": "Revoke API key",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-Admin-Key", "value": "{{admin_key}}" }],
+            "url": "{{base_url}}/v1/keys/{{key_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Remove background",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "image", "type": "file", "src": [] }
+          ]
+        },
+        "url": "{{base_url}}/v1/remove-background"
+      }
+    },
+    {
+      "name": "Remove background (batch)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "X-API-Key", "value": "{{api_key}}" }],
+        "body": {
+          "mode": "formdata",
+          "formdata": [
+            { "key": "images", "type": "file", "src": [] },
+            { "key": "images", "type": "file", "src": [] }
+          ]
+        },
+        "url": "{{base_url}}/v1/remove-background/batch"
+      }
+    }
+  ]
+}

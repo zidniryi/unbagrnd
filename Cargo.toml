@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["src-tauri", "core", "api"]
+
+# Cargo only reads [profile.*] tables from the workspace root once a crate is
+# part of a workspace, so this now lives here instead of src-tauri/Cargo.toml.
+#
+# `panic = "abort"` was dropped from the desktop app's old profile: profile
+# settings apply workspace-wide, and an aborting panic strategy would let a
+# single panicking request handler in the API server take down the whole
+# process instead of just that request's task. Everything else (opt-level,
+# LTO, strip) is unaffected and still shrinks the desktop/mobile binary.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

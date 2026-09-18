@@ -94,8 +94,8 @@ Grab the installer for your platform from the
   depends on no longer ships prebuilt binaries for Intel Macs)
 - **Windows:** `.msi` / `.exe`
 - **Linux:** `.AppImage` / `.deb`
-- **Android:** not yet in the automated release pipeline — build the APK
-  yourself, see [Android](#android) below.
+- **Android:** `.apk` / `.aab` (debug-signed — fine for sideloading, see
+  [Android](#android) below for a release-signed build)
 
 On first launch, or the first time you remove a background, unbagrnd
 downloads the model (~170 MB) and shows a progress bar while it does. That
@@ -141,8 +141,12 @@ Produces a native installer for your current OS in
 
 ### Android
 
-Requires the Android SDK, an NDK, and JDK 17+ (`ANDROID_HOME` and
-`NDK_HOME` set), on top of the prerequisites above:
+Every tagged release already ships a debug-signed `.apk`/`.aab` (see
+[Releases](../../releases)) — good enough for sideloading. Build one
+yourself only if you need a release-signed build or want to develop
+against a connected device/emulator. Requires the Android SDK, an NDK, and
+JDK 17+ (`ANDROID_HOME` and `NDK_HOME` set), on top of the prerequisites
+above:
 
 ```sh
 npx tauri android init   # first time only, scaffolds gen/android
@@ -188,28 +192,208 @@ directory) - it falls back to a directory inside the app's own storage.
 ### Running the Rust test suite
 
 ```sh
-cd src-tauri
-cargo test
+cargo test --workspace   # run from the repo root - covers core, src-tauri and api
 ```
 
 Most of the backend is covered by ordinary `cargo test`. The one exception
-is the end-to-end inference test (decode → preprocess → run the model →
-composite the alpha channel), which needs a real cached model file and is
-skipped by default so a fresh clone doesn't need a 170 MB download just to
-run `cargo test`. To run it locally:
+is the end-to-end inference test in `core` (decode → preprocess → run the
+model → composite the alpha channel), which needs a real cached model file
+and is skipped by default so a fresh clone doesn't need a 170 MB download
+just to run `cargo test`. To run it locally:
 
 ```sh
-UNBAGRND_TEST_MODEL_PATH=/path/to/isnet-general-use.onnx \
+UNBAGRND_TEST_MODEL_KEY=silueta \
+UNBAGRND_TEST_MODEL_PATH=/path/to/silueta.onnx \
 UNBAGRND_TEST_IMAGE_PATH=/path/to/a/photo.jpg \
 cargo test --release removes_background_from_a_real_photo -- --nocapture
 ```
 
+`api`'s own tests (`cargo test -p unbagrnd-api`) exercise the real Axum
+router end to end (auth, key lifecycle, image validation) against a
+throwaway SQLite file, no model or network access needed.
+
 ### Releasing
 
-Pushing a tag matching `v*` (e.g. `v0.2.0`) triggers
+Pushing a tag matching `v*` (e.g. `v0.3.3`) triggers
 [`.github/workflows/build.yml`](.github/workflows/build.yml), which builds
-installers for macOS (Apple Silicon + Intel), Windows, and Linux, and
-attaches them to a draft GitHub release.
+installers for macOS (Apple Silicon + Intel), Windows, and Linux, builds a
+debug-signed Android APK/AAB, and attaches all of it to a draft GitHub
+release.
+
+## API
+
+A self-hosted REST API wrapping the exact same on-device background-removal
+core the desktop app uses — no cloud, no account, no image ever sent
+anywhere but your own server.
+
+### Architecture
+
+```text
+                 unbagrnd
+                     |
+          +----------+----------+
+          |                     |
+     Desktop App             API Server
+       (Tauri)                 (Axum)
+          |                     |
+          +----------+----------+
+                     |
+              unbagrnd-core
+           (models.rs, bg_remove.rs)
+                     |
+              ONNX Runtime
+```
+
+`core/` has the one and only background-removal implementation (model
+catalog, download/caching, ONNX Runtime inference) — both the desktop app
+and the API wrap it, neither reimplements it. See
+[Project structure](#project-structure) above.
+
+### Quick start
+
+```sh
+git clone https://github.com/zidniryi/unbagrnd.git
+cd unbagrnd
+cp .env.example .env
+# edit .env and set UNBAGRND_ADMIN_KEY (e.g. `openssl rand -hex 32`)
+docker compose up --build
+```
+
+```sh
+curl http://localhost:8080/health
+# {"status":"ok"}
+```
+
+Interactive API docs (Swagger UI): `http://localhost:8080/docs`. A ready-made
+Postman collection is at
+[`docs/unbagrnd-api.postman_collection.json`](docs/unbagrnd-api.postman_collection.json).
+
+### Environment variables
+
+See [`.env.example`](.env.example) for the full, commented list. The
+important ones:
+
+| Variable                             | Default                       | Meaning                                             |
+| ------------------------------------- | ------------------------------ | ---------------------------------------------------- |
+| `HOST` / `PORT`                       | `0.0.0.0` / `8080`             | Where the server listens                             |
+| `DATABASE_URL`                        | `sqlite:///data/unbagrnd.db`   | API key metadata storage                             |
+| `UNBAGRND_ADMIN_KEY`                  | *(unset)*                      | Required for `/v1/keys` — see below                  |
+| `UNBAGRND_MODEL_KEY`                  | `silueta`                      | Which model to load at startup                       |
+| `UNBAGRND_MODELS_DIR`                 | `/models`                      | Where the model is cached                            |
+| `UNBAGRND_MAX_FILE_SIZE_MB`           | `20`                           | Upload size limit                                    |
+| `UNBAGRND_MAX_IMAGE_WIDTH` / `HEIGHT` | `8192`                         | Image dimension limit                                |
+| `UNBAGRND_MAX_CONCURRENT_INFERENCES`  | `2`                            | Bounds simultaneous `remove-background` calls        |
+| `UNBAGRND_MAX_BATCH_SIZE`             | `10`                           | Max images per `remove-background/batch` request     |
+| `UNBAGRND_RATE_LIMIT_PER_MINUTE`      | `60`                           | Per-API-key limit; `0` disables it; resets on restart |
+| `UNBAGRND_CORS_ORIGINS`               | `*`                            | Comma-separated allowlist, or `*`                     |
+
+### API key management
+
+Every `/v1/keys` route requires `X-Admin-Key: $UNBAGRND_ADMIN_KEY` — a
+regular API key (the kind handed out below to callers of
+`/v1/remove-background`) can never create, list or revoke other keys. If
+`UNBAGRND_ADMIN_KEY` isn't set, these routes are disabled (`503`) rather
+than falling back to some default credential.
+
+```sh
+curl -X POST http://localhost:8080/v1/keys \
+  -H "X-Admin-Key: $UNBAGRND_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-production-key"}'
+# {"id":"...","name":"my-production-key","api_key":"unb_live_...","created_at":"..."}
+```
+
+`api_key` is only ever returned here, at creation time — only its SHA-256
+hash is stored (see `key_hash` in `migrations/0001_api_keys.sql`), so save
+it now. `GET /v1/keys` lists metadata only (never the key or its hash);
+`DELETE /v1/keys/{id}` revokes it immediately (soft-deleted, so
+`revoked_at` stays as an audit trail).
+
+### Removing a background
+
+```sh
+curl -X POST http://localhost:8080/v1/remove-background \
+  -H "X-API-Key: unb_live_xxxxxxxxx" \
+  -F "image=@photo.jpg" \
+  --output result.png
+```
+
+Returns a transparent PNG (`Content-Type: image/png`). The upload is
+processed in memory and discarded — nothing about it is written to disk or
+logged.
+
+### Batch
+
+```sh
+curl -X POST http://localhost:8080/v1/remove-background/batch \
+  -H "X-API-Key: unb_live_xxxxxxxxx" \
+  -F "images=@photo1.jpg" \
+  -F "images=@photo2.jpg" \
+  -F "images=@photo3.jpg"
+```
+
+Up to `UNBAGRND_MAX_BATCH_SIZE` images in one request (repeat the `images`
+field, one per file). Always returns `200` with one result per image, in
+upload order — a single corrupt or unreadable file doesn't fail the rest of
+the batch:
+
+```json
+{
+  "results": [
+    { "filename": "photo1.jpg", "status": "ok", "image_base64": "..." },
+    { "filename": "photo2.jpg", "status": "ok", "image_base64": "..." },
+    { "filename": "photo3.jpg", "status": "error", "error": { "code": "UNSUPPORTED_IMAGE", "message": "..." } }
+  ]
+}
+```
+
+Every item still goes through the same `UNBAGRND_MAX_CONCURRENT_INFERENCES`
+semaphore a single `/v1/remove-background` call does, so a large batch
+queues internally rather than spiking resource usage.
+
+### Endpoints
+
+| Method   | Path                            | Auth            | Description                          |
+| -------- | -------------------------------- | ---------------- | ------------------------------------- |
+| `GET`    | `/health`                        | none             | Liveness check                        |
+| `POST`   | `/v1/keys`                       | `X-Admin-Key`    | Create an API key                     |
+| `GET`    | `/v1/keys`                        | `X-Admin-Key`    | List API key metadata                 |
+| `DELETE` | `/v1/keys/{id}`                   | `X-Admin-Key`    | Revoke an API key                     |
+| `POST`   | `/v1/remove-background`           | `X-API-Key`      | Remove one image's background         |
+| `POST`   | `/v1/remove-background/batch`     | `X-API-Key`      | Remove backgrounds from up to `UNBAGRND_MAX_BATCH_SIZE` images |
+| `GET`    | `/docs`                           | none             | Swagger UI                            |
+
+Errors are always JSON: `{"error": {"code": "INVALID_API_KEY", "message": "..."}}`.
+
+### Security & privacy
+
+- API keys: `unb_live_` + 256 bits of CSPRNG-generated entropy, SHA-256
+  hashed at rest, compared in constant time. Never logged (only the
+  safe-to-display `key_prefix` is).
+- Upload size, image dimensions, inference concurrency and per-key request
+  rate are all bounded and configurable.
+- Nothing this server processes is sent to any third party. There's no
+  analytics, no telemetry, and no dependency on any unbagrnd-operated
+  service — it's exactly as self-contained as the desktop app.
+
+### Development (without Docker)
+
+```sh
+cp .env.example .env   # set UNBAGRND_ADMIN_KEY
+cargo run -p unbagrnd-api
+```
+
+`UNBAGRND_MODELS_DIR`/`DATABASE_URL` default to `/models`/`/data`, which
+won't be writable outside a container — override both to local paths in
+`.env` (e.g. `./tmp/models`, `sqlite://./tmp/unbagrnd.db`) for local runs.
+
+### Production deployment
+
+Put a reverse proxy (Caddy, nginx, Traefik, ...) in front of it for TLS;
+`unbagrnd-api` itself only speaks plain HTTP. Restrict
+`UNBAGRND_CORS_ORIGINS` to your actual frontend origin(s) rather than `*`,
+and treat `UNBAGRND_ADMIN_KEY` like any other production secret (a real
+secrets manager, not a checked-in `.env`).
 
 ## Where the model is cached, and how to clear it
 
@@ -231,20 +415,39 @@ model") instead, or just uninstall the app.
 
 ## Project structure
 
+A Cargo workspace with three Rust members: the shared inference core, the
+Tauri desktop app, and the self-hosted REST API — see [API](#api) below for
+why it's split this way.
+
 ```
 unbagrnd/
-  src/                    # frontend: plain HTML/CSS/JS, no framework
+  Cargo.toml                # workspace root (members: core, src-tauri, api)
+  src/                       # desktop frontend: plain HTML/CSS/JS, no framework
     index.html
     styles.css
     main.js
-  src-tauri/
+  core/                      # unbagrnd-core: the one background-removal implementation
     src/
-      lib.rs              # app entrypoint, plugin & command registration
-      commands.rs          # Tauri commands exposed to the frontend
-      model.rs             # one-time model download, caching, checksum
-      bg_remove.rs          # preprocessing, inference, postprocessing
+      models.rs               # model catalog + download/caching (host-agnostic)
+      bg_remove.rs             # preprocessing, inference, postprocessing
+  src-tauri/                 # desktop app - wraps core with Tauri commands
+    src/
+      lib.rs                   # app entrypoint, plugin & command registration
+      commands.rs              # Tauri commands exposed to the frontend
+      models.rs                # thin AppHandle wrapper around core::models
+      background.rs, refine.rs # background-fill/shadow and manual mask refine
+      settings.rs, system_usage.rs
+  api/                        # unbagrnd-api: self-hosted REST API - wraps core with Axum
+    src/
+      main.rs, config.rs, state.rs, error.rs, openapi.rs
+      auth/                    # X-API-Key / X-Admin-Key extractors
+      db/                      # SQLite (sqlx) - API key metadata
+      routes/                  # /health, /v1/keys, /v1/remove-background
+    tests/api_test.rs
+  migrations/                 # sqlx SQL migrations for the API's SQLite database
+  Dockerfile, docker-compose.yml, .env.example
   .github/workflows/
-    build.yml              # cross-platform release builds
+    build.yml                  # cross-platform desktop + Android release builds
 ```
 
 ## License

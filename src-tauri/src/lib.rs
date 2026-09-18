@@ -1,16 +1,15 @@
 #[cfg(target_os = "android")]
 mod android_gallery;
 mod background;
-mod bg_remove;
 mod commands;
 mod models;
 mod refine;
 mod settings;
 mod system_usage;
 
-use bg_remove::InferenceState;
 use commands::LastResultState;
 use system_usage::SystemUsageState;
+use unbagrnd_core::bg_remove::InferenceState;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

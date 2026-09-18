@@ -89,8 +89,7 @@ pub fn publish<R: Runtime>(
         .run_mobile_plugin::<SaveResponse>("saveToGallery", request)
         .map_err(|e| e.to_string())?;
 
-    *app
-        .state::<LastGalleryUri>()
+    *app.state::<LastGalleryUri>()
         .0
         .lock()
         .map_err(|_| "gallery state lock poisoned".to_string())? = Some(response.uri);

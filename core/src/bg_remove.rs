@@ -22,6 +22,12 @@ use crate::models::{ModelSpec, OutputMode};
 /// inference call goes through this single mutex-guarded map.
 pub struct InferenceState(Mutex<HashMap<String, Session>>);
 
+impl Default for InferenceState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl InferenceState {
     pub fn new() -> Self {
         Self(Mutex::new(HashMap::new()))
@@ -76,7 +82,9 @@ pub fn remove_background(
         if !sessions.contains_key(spec.key) {
             sessions.insert(spec.key.to_string(), build_session(model_path)?);
         }
-        let session = sessions.get_mut(spec.key).expect("session was just inserted");
+        let session = sessions
+            .get_mut(spec.key)
+            .expect("session was just inserted");
         run_inference(session, spec, original)?
     };
 

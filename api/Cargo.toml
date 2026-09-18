@@ -1,0 +1,61 @@
+[package]
+name = "unbagrnd-api"
+version = "0.4.0"
+description = "Self-hosted REST API for unbagrnd: local, on-device background removal over HTTP. No cloud, no account, no image ever leaves your server."
+authors = ["zidniryi"]
+license = "MIT"
+repository = "https://github.com/unbagrnd/unbagrnd"
+edition = "2021"
+
+[[bin]]
+name = "unbagrnd-api"
+path = "src/main.rs"
+
+[dependencies]
+# The one and only background-removal implementation - see core/.
+unbagrnd-core = { path = "../core" }
+
+axum = { version = "0.8", features = ["multipart"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "fs"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# API-key storage. Runtime-checked queries only (no `query!` macros) so the
+# Docker build never needs a live DATABASE_URL or a checked-in `.sqlx` cache.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "sqlite",
+    "migrate",
+    "macros",
+    "chrono",
+] }
+
+# Image decode (to sniff/validate an uploaded photo) + PNG encode (the response).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "bmp", "tiff", "gif"] }
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+
+# API key generation/hashing.
+rand = "0.8"
+sha2 = "0.11"
+hex = "0.4"
+subtle = "2"
+
+# Encodes each result image in a batch /v1/remove-background/batch response.
+base64 = "0.23"
+
+# OpenAPI / Swagger UI at /docs.
+utoipa = { version = "5", features = ["axum_extras"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+
+[dev-dependencies]
+http-body-util = "0.1"
