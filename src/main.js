@@ -7,6 +7,7 @@ const { listen } = window.__TAURI__.event;
 const { getCurrentWebview } = window.__TAURI__.webview;
 const { ask, open } = window.__TAURI__.dialog;
 const { revealItemInDir } = window.__TAURI__.opener;
+const { getVersion } = window.__TAURI__.app;
 
 const IMAGE_FILTERS = [
   { name: "Images", extensions: ["png", "jpg", "jpeg", "webp", "bmp", "tiff", "tif", "gif"] },
@@ -1436,6 +1437,15 @@ async function pollResourceUsage() {
 // ---------------------------------------------------------------------
 
 async function init() {
+  // Read straight from the running build (tauri.conf.json's `version` at
+  // build time) rather than a hardcoded string in index.html, which was
+  // left stale through several releases before this.
+  getVersion()
+    .then((version) => {
+      $("app-version").textContent = version;
+    })
+    .catch(() => {});
+
   activateTab("single");
   refreshOutputDirDisplay();
   await setupDragAndDrop();
