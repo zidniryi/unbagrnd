@@ -1388,7 +1388,11 @@ const dropzones = [
 // is in logical/CSS pixels, so it has to be converted before comparing the two
 // (otherwise zone detection is wrong on any HiDPI/Retina display).
 function zoneUnderPoint(physicalPosition) {
-  const { x, y } = physicalPosition.toLogical(window.devicePixelRatio);
+  // Event payloads cross Tauri's IPC boundary as plain objects, so they do not
+  // retain the PhysicalPosition.toLogical() prototype method.
+  const scale = window.devicePixelRatio || 1;
+  const x = physicalPosition.x / scale;
+  const y = physicalPosition.y / scale;
   for (const zone of dropzones) {
     if (zone.el.hidden) continue;
     const rect = zone.el.getBoundingClientRect();
