@@ -1384,23 +1384,12 @@ const dropzones = [
   }),
 ];
 
-// `position` on drag-drop events is in physical pixels; `getBoundingClientRect()`
-// is in logical/CSS pixels, so it has to be converted before comparing the two
-// (otherwise zone detection is wrong on any HiDPI/Retina display).
-function zoneUnderPoint(physicalPosition) {
-  // Event payloads cross Tauri's IPC boundary as plain objects, so they do not
-  // retain the PhysicalPosition.toLogical() prototype method.
-  const scale = window.devicePixelRatio || 1;
-  const x = physicalPosition.x / scale;
-  const y = physicalPosition.y / scale;
-  for (const zone of dropzones) {
-    if (zone.el.hidden) continue;
-    const rect = zone.el.getBoundingClientRect();
-    if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-      return zone;
-    }
-  }
-  return null;
+function activeDropzone() {
+  // Only one mode is visible at a time, so route the native file drop to that
+  // mode directly. Native backends do not report positions in consistent
+  // coordinate units (notably Cocoa points on macOS), making hit-testing here
+  // unreliable on Retina displays.
+  return dropzones.find((zone) => !zone.el.hidden) ?? null;
 }
 
 async function setupDragAndDrop() {
@@ -1408,11 +1397,11 @@ async function setupDragAndDrop() {
   await webview.onDragDropEvent((event) => {
     const payload = event.payload;
     if (payload.type === "enter" || payload.type === "over") {
-      const zone = zoneUnderPoint(payload.position);
+      const zone = activeDropzone();
       for (const z of dropzones) z.highlight(z === zone);
     } else if (payload.type === "drop") {
       for (const z of dropzones) z.highlight(false);
-      const zone = zoneUnderPoint(payload.position);
+      const zone = activeDropzone();
       if (zone && !busy) {
         zone.onPaths(payload.paths);
       }
