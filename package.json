@@ -1,7 +1,7 @@
 {
   "name": "unbagrnd",
   "private": true,
-  "version": "0.5.0",
+  "version": "0.5.5",
   "type": "module",
   "license": "MIT",
   "description": "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry.",

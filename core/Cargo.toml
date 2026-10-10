@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd-core"
-version = "0.5.0"
+version = "0.5.5"
 description = "Shared on-device background-removal inference core for unbagrnd: model catalog, model download/caching, and ONNX Runtime inference. Used by both the Tauri desktop app and the self-hosted REST API."
 authors = ["zidniryi"]
 license = "MIT"

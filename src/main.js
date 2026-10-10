@@ -212,6 +212,116 @@ let batchShadowPreset = "natural";
 
 function setStatus(text) {
   statusLine.textContent = text;
+  // The status line sits at the bottom of the page - off-screen on a phone
+  // and hidden under the editors - so a failure is also raised as a toast.
+  if (text.startsWith("Failed:")) showToast(text, { kind: "error" });
+}
+
+// ---------------------------------------------------------------------
+// Toasts
+// ---------------------------------------------------------------------
+
+const toastRegion = $("toast-region");
+const TOAST_LIMIT = 3;
+const TOAST_MS = { success: 4500, warning: 6500, error: 7000 };
+
+function dismissToast(el) {
+  clearTimeout(el._timer);
+  if (el.classList.contains("is-leaving")) return;
+  el.classList.add("is-leaving");
+  setTimeout(() => el.remove(), 180);
+}
+
+function armToast(el, duration) {
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => dismissToast(el), duration);
+}
+
+/**
+ * Shows a short-lived confirmation. `kind` is "success" | "warning" |
+ * "error". With `actionLabel` + `onAction` a button is added (e.g. "Show").
+ * An identical toast that's still up just has its timer refreshed, so a
+ * burst of the same error doesn't stack up.
+ */
+function showToast(message, { kind = "success", actionLabel = null, onAction = null, duration = null } = {}) {
+  if (!toastRegion) return;
+  const ms = duration ?? TOAST_MS[kind] ?? TOAST_MS.success;
+
+  for (const existing of toastRegion.children) {
+    if (existing.dataset.message === message && existing.dataset.kind === kind) {
+      existing.classList.remove("is-leaving");
+      existing._ms = ms;
+      armToast(existing, ms);
+      return;
+    }
+  }
+
+  const el = document.createElement("div");
+  el.className = `toast toast--${kind}`;
+  el.dataset.message = message;
+  el.dataset.kind = kind;
+  el.setAttribute("role", kind === "error" ? "alert" : "status");
+  el._ms = ms;
+
+  const text = document.createElement("span");
+  text.className = "toast__text";
+  text.textContent = message;
+  el.appendChild(text);
+
+  // `data-keep-enabled`: setBusy() disables every button while work runs,
+  // but a toast's own controls should stay usable.
+  if (actionLabel && onAction) {
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "toast__action";
+    action.textContent = actionLabel;
+    action.setAttribute("data-keep-enabled", "");
+    action.addEventListener("click", () => {
+      dismissToast(el);
+      onAction();
+    });
+    el.appendChild(action);
+  }
+
+  const close = document.createElement("button");
+  close.type = "button";
+  close.className = "toast__close";
+  close.textContent = "✕";
+  close.setAttribute("aria-label", "Dismiss");
+  close.setAttribute("data-keep-enabled", "");
+  close.addEventListener("click", () => dismissToast(el));
+  el.appendChild(close);
+
+  // Hovering pauses the countdown so there's time to reach the button.
+  el.addEventListener("mouseenter", () => clearTimeout(el._timer));
+  el.addEventListener("mouseleave", () => armToast(el, el._ms));
+
+  toastRegion.appendChild(el);
+  while (toastRegion.children.length > TOAST_LIMIT) {
+    toastRegion.firstElementChild.remove();
+  }
+  armToast(el, ms);
+}
+
+/** Last path segment, for showing a file name instead of a long path. */
+function baseName(path) {
+  return String(path).split(/[/\\]/).pop() || String(path);
+}
+
+/** Reveals `path` in the file manager (or opens it in the Gallery on Android, where that's unsupported). */
+function revealSavedFile(path) {
+  if (!path) return;
+  revealItemInDir(path).catch(() => {
+    invoke("reveal_last_export_in_gallery").catch((err) => setStatus(String(err)));
+  });
+}
+
+/** "Saved" toast with a Show action for a file the app just wrote. */
+function toastSaved(label, path) {
+  showToast(`${label} - ${baseName(path)}`, {
+    actionLabel: "Show",
+    onAction: () => revealSavedFile(path),
+  });
 }
 
 function setBusy(isBusy) {
@@ -381,6 +491,7 @@ function downloadModelWithProgress(key) {
       const info = await invoke("download_model", { key });
       const idx = models.findIndex((m) => m.key === key);
       if (idx >= 0) models[idx] = info;
+      showToast(`${info.displayName} downloaded`);
       return info;
     } finally {
       delete activeProgress[key];
@@ -596,6 +707,7 @@ async function exportMask() {
     setStatus("Saving mask…");
     const outputPath = await invoke("export_mask", { outputDir, exportFormat });
     setStatus(`Saved mask to ${outputPath}`);
+    toastSaved("Mask saved", outputPath);
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
@@ -608,13 +720,9 @@ singleMaskBtn.addEventListener("click", exportMask);
 refineMaskBtn.addEventListener("click", exportMask);
 
 singleRevealBtn.addEventListener("click", () => {
-  if (lastSingleOutputPath) {
-    revealItemInDir(lastSingleOutputPath).catch(() => {
-      // Unsupported on Android - open the exported photo in the gallery
-      // app instead, since there's no "reveal in folder" there anyway.
-      invoke("reveal_last_export_in_gallery").catch((err) => setStatus(String(err)));
-    });
-  }
+  // On Android this falls back to opening the exported photo in the
+  // gallery app, since there's no "reveal in folder" there.
+  revealSavedFile(lastSingleOutputPath);
 });
 
 /**
@@ -944,6 +1052,7 @@ bgEditorDownloadBtn.addEventListener("click", async () => {
       exportFormat,
     });
     setStatus(`Saved to ${outputPath}`);
+    toastSaved("Image saved", outputPath);
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
@@ -1021,8 +1130,6 @@ function updateRefineStrokeButtons() {
   const hasPending = refineStrokes.length > 0;
   refineApplyBtn.disabled = !hasPending;
   refineClearBtn.disabled = !hasPending;
-  for (const el of refineModeRow.querySelectorAll(".bg-shadow-preset")) el.disabled = hasPending;
-  for (const el of refineRestoreRow.querySelectorAll(".refine-restore-btn")) el.disabled = hasPending;
   updateEdgeControls();
 }
 
@@ -1097,9 +1204,13 @@ async function updateRefinePreview() {
   }
 }
 
-refineModeRow.addEventListener("click", (event) => {
+refineModeRow.addEventListener("click", async (event) => {
   const btn = event.target.closest(".bg-shadow-preset");
-  if (!btn || btn.disabled) return;
+  if (!btn || btn.disabled || btn.dataset.mode === refineMode) return;
+  // Pending strokes were painted in the current mode and are applied with
+  // it, so commit them before switching - otherwise they'd be re-interpreted
+  // in the new mode.
+  if (!(await applyPendingStrokes())) return;
   refineMode = btn.dataset.mode;
   for (const el of refineModeRow.querySelectorAll(".bg-shadow-preset")) {
     el.classList.toggle("active", el === btn);
@@ -1111,9 +1222,10 @@ refineModeRow.addEventListener("click", (event) => {
   refineRestoreToGroup.hidden = refineMode !== "restore";
 });
 
-refineRestoreRow.addEventListener("click", (event) => {
+refineRestoreRow.addEventListener("click", async (event) => {
   const btn = event.target.closest(".refine-restore-btn");
-  if (!btn || btn.disabled) return;
+  if (!btn || btn.disabled || btn.dataset.restoreTo === refineRestoreTo) return;
+  if (!(await applyPendingStrokes())) return;
   refineRestoreTo = btn.dataset.restoreTo;
   for (const el of refineRestoreRow.querySelectorAll(".refine-restore-btn")) {
     el.classList.toggle("active", el === btn);
@@ -1248,6 +1360,7 @@ edgeApplyBtn.addEventListener("click", async () => {
     redrawRefineCanvasBase();
     previewAfter.src = dataUrl;
     setStatus("Applied edge adjustment.");
+    showToast("Edge adjustment applied", { duration: 2200 });
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
@@ -1261,19 +1374,32 @@ edgeApplyBtn.addEventListener("click", async () => {
 refineClearBtn.addEventListener("click", () => {
   clearTimeout(refinePreviewDebounceTimer);
   refinePreviewRequestId++; // invalidate any in-flight preview response
+  // The invalidated request's `finally` only hides the spinner for the
+  // *current* request id, and a Clear inside the debounce window never
+  // starts one at all - so hide it here, or the overlay keeps covering the
+  // canvas and the editor looks stuck.
+  refineLoading.hidden = true;
   refineStrokes = [];
   refineCurrentStroke = null;
   updateRefineStrokeButtons();
   redrawRefineCanvasBase();
 });
 
-refineApplyBtn.addEventListener("click", async () => {
-  if (refineStrokes.length === 0 || busy) return;
+/**
+ * Commits the pending brush strokes to the working image. Resolves `true`
+ * when there was nothing to apply or the apply succeeded, `false` if it
+ * failed or the app was busy - callers that need the strokes committed
+ * before doing something else (switching mode) must check this.
+ */
+async function applyPendingStrokes() {
+  if (refineStrokes.length === 0) return true;
+  if (busy) return false;
   clearTimeout(refinePreviewDebounceTimer);
   refinePreviewRequestId++; // invalidate any in-flight preview response
   setBusy(true);
   refineLocked = true;
   refineLoading.hidden = false;
+  let ok = false;
   try {
     const dataUrl = await invoke("apply_refine", {
       strokes: refineStrokes,
@@ -1289,6 +1415,8 @@ refineApplyBtn.addEventListener("click", async () => {
     updateRefineStrokeButtons();
     updateRefineUndoRedoButtons();
     setStatus("Applied.");
+    showToast("Brush edits applied", { duration: 2200 });
+    ok = true;
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
@@ -1299,6 +1427,11 @@ refineApplyBtn.addEventListener("click", async () => {
     // enabled/disabled state back.
     updateRefineControls();
   }
+  return ok;
+}
+
+refineApplyBtn.addEventListener("click", () => {
+  applyPendingStrokes();
 });
 
 refineUndoBtn.addEventListener("click", async () => {
@@ -1364,6 +1497,7 @@ refineDownloadBtn.addEventListener("click", async () => {
     setStatus("Saving…");
     const outputPath = await invoke("export_refine", { outputDir, exportFormat });
     setStatus(`Saved to ${outputPath}`);
+    toastSaved("Cutout saved", outputPath);
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
@@ -1450,13 +1584,9 @@ batchResetBtn.addEventListener("click", () => {
 });
 
 batchRevealBtn.addEventListener("click", () => {
-  if (lastBatchOutputDir) {
-    revealItemInDir(lastBatchOutputDir).catch(() => {
-      // Unsupported on Android - fall back to opening the last exported
-      // photo in the gallery app instead of its (inaccessible) folder.
-      invoke("reveal_last_export_in_gallery").catch((err) => setStatus(String(err)));
-    });
-  }
+  // On Android this falls back to opening the last exported photo in the
+  // gallery app instead of its (inaccessible) folder.
+  revealSavedFile(lastBatchOutputDir);
 });
 
 // ---- Batch options (background, shadow, file name) ----
@@ -1723,6 +1853,7 @@ async function runBatch(indices) {
 async function processBatch(paths) {
   if (busy) return;
   setBusy(true);
+  let completed = false;
   batch = null;
   batchFileList.innerHTML = "";
   batchProgressFill.style.width = "0%";
@@ -1748,12 +1879,32 @@ async function processBatch(paths) {
 
     await ensureModelReady(selectedModelKey);
     await runBatch(entries.map((_, i) => i));
+    completed = true;
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
     setBusy(false);
     updateBatchButtons();
+    if (completed) toastBatchOutcome();
   }
+}
+
+/** One summary toast once a batch run (or a retry) has settled. */
+function toastBatchOutcome() {
+  const { done, error, cancelled } = batchCounts();
+  const parts = [];
+  if (done > 0) parts.push(`${done} done`);
+  if (error > 0) parts.push(`${error} failed`);
+  if (cancelled > 0) parts.push(`${cancelled} not processed`);
+  if (parts.length === 0) return;
+
+  const clean = error === 0 && cancelled === 0;
+  const title = clean ? "Batch complete" : cancelled > 0 ? "Batch stopped" : "Batch finished with errors";
+  showToast(`${title} - ${parts.join(", ")}`, {
+    kind: clean ? "success" : "warning",
+    actionLabel: done > 0 && lastBatchOutputDir ? "Show" : null,
+    onAction: () => revealSavedFile(lastBatchOutputDir),
+  });
 }
 
 batchCancelBtn.addEventListener("click", async () => {
@@ -1778,14 +1929,17 @@ batchRetryBtn.addEventListener("click", async () => {
   batchZipBtn.hidden = true;
   for (const i of indices) resetEntryForRetry(batch.entries[i]);
   refreshBatchProgress();
+  let completed = false;
   try {
     await ensureModelReady(selectedModelKey);
     await runBatch(indices);
+    completed = true;
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
     setBusy(false);
     updateBatchButtons();
+    if (completed) toastBatchOutcome();
   }
 });
 
@@ -1807,6 +1961,7 @@ batchZipBtn.addEventListener("click", async () => {
     setStatus("Creating ZIP…");
     const zipPath = await invoke("export_batch_zip", { files, zipPath: picked });
     setStatus(`Saved ZIP to ${zipPath}`);
+    toastSaved("ZIP saved", zipPath);
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
