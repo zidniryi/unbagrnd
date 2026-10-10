@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd-api"
-version = "0.5.0"
+version = "0.5.5"
 description = "Self-hosted REST API for unbagrnd: local, on-device background removal over HTTP. No cloud, no account, no image ever leaves your server."
 authors = ["zidniryi"]
 license = "MIT"
