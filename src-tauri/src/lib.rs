@@ -2,12 +2,13 @@
 mod android_gallery;
 mod background;
 mod commands;
+mod matte;
 mod models;
 mod refine;
 mod settings;
 mod system_usage;
 
-use commands::LastResultState;
+use commands::{BatchCancelState, LastResultState};
 use system_usage::SystemUsageState;
 use unbagrnd_core::bg_remove::InferenceState;
 
@@ -26,6 +27,7 @@ pub fn run() {
         .manage(InferenceState::new())
         .manage(SystemUsageState::new())
         .manage(LastResultState::new())
+        .manage(BatchCancelState::new())
         .invoke_handler(tauri::generate_handler![
             commands::list_models,
             commands::get_settings,
@@ -46,6 +48,11 @@ pub fn run() {
             commands::undo_refine,
             commands::redo_refine,
             commands::export_refine,
+            commands::preview_edges,
+            commands::apply_edges,
+            commands::export_mask,
+            commands::cancel_batch,
+            commands::export_batch_zip,
             commands::reveal_last_export_in_gallery,
             system_usage::get_system_usage,
         ])

@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd"
-version = "0.4.0"
+version = "0.5.0"
 description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
 authors = ["zidniryi"]
 license = "MIT"
@@ -47,3 +47,8 @@ base64 = "0.23"
 
 # System-wide CPU/RAM usage shown in the footer.
 sysinfo = "0.33"
+
+# Packing a batch's outputs into one archive. Entries are stored, not
+# deflated (PNG/WebP are already compressed), so no compression backends are
+# needed.
+zip = { version = "3", default-features = false }

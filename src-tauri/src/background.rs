@@ -22,7 +22,7 @@ pub struct ShadowSpec {
 }
 
 /// Parses a `#rrggbb` (or bare `rrggbb`) hex string into an opaque color.
-fn parse_hex_color(hex: &str) -> Result<Rgba<u8>, String> {
+pub fn parse_hex_color(hex: &str) -> Result<Rgba<u8>, String> {
     let hex = hex.trim_start_matches('#');
     if hex.len() != 6 {
         return Err(format!("invalid color \"{hex}\" (expected #rrggbb)"));
