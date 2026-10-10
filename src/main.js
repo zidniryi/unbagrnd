@@ -5,7 +5,7 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWebview } = window.__TAURI__.webview;
-const { ask, open } = window.__TAURI__.dialog;
+const { ask, open, save } = window.__TAURI__.dialog;
 const { revealItemInDir } = window.__TAURI__.opener;
 const { getVersion } = window.__TAURI__.app;
 
@@ -73,6 +73,7 @@ const singleRevealBtn = $("single-reveal-btn");
 const singleResetBtn = $("single-reset-btn");
 const singleEditBgBtn = $("single-edit-bg-btn");
 const singleRefineBtn = $("single-refine-btn");
+const singleMaskBtn = $("single-mask-btn");
 
 // ---- Refine editor ----
 const refineOverlay = $("refine-editor-overlay");
@@ -92,6 +93,16 @@ const refineRestoreOriginalThumb = $("refine-restore-original-thumb");
 const refineRestoreStartThumb = $("refine-restore-start-thumb");
 const refineClearBtn = $("refine-clear-btn");
 const refineApplyBtn = $("refine-apply-btn");
+const refineMaskBtn = $("refine-mask-btn");
+const edgeHint = $("edge-hint");
+const edgeShiftInput = $("edge-shift");
+const edgeSmoothInput = $("edge-smooth");
+const edgeFeatherInput = $("edge-feather");
+const edgeShiftLabel = $("edge-shift-label");
+const edgeSmoothLabel = $("edge-smooth-label");
+const edgeFeatherLabel = $("edge-feather-label");
+const edgeResetBtn = $("edge-reset-btn");
+const edgeApplyBtn = $("edge-apply-btn");
 
 // ---- Background editor ----
 const bgEditorOverlay = $("background-editor-overlay");
@@ -114,6 +125,14 @@ const bgShadowOpacityInput = $("bg-shadow-opacity");
 const bgShadowOpacityLabel = $("bg-shadow-opacity-label");
 
 // ---- Batch mode ----
+const batchOptionsEl = $("batch-options");
+const batchSwatchesEl = $("batch-swatches");
+const batchShadowEnable = $("batch-shadow-enable");
+const batchShadowControls = $("batch-shadow-controls");
+const batchShadowPresetsEl = $("batch-shadow-presets");
+const batchShadowOpacityInput = $("batch-shadow-opacity");
+const batchShadowOpacityLabel = $("batch-shadow-opacity-label");
+const batchNameTemplateInput = $("batch-name-template");
 const batchDropzone = $("batch-dropzone");
 const batchPickFilesBtn = $("batch-pick-files-btn");
 const batchPickFolderBtn = $("batch-pick-folder-btn");
@@ -123,6 +142,10 @@ const batchProgressLabel = $("batch-progress-label");
 const batchFileList = $("batch-file-list");
 const batchRevealBtn = $("batch-reveal-btn");
 const batchResetBtn = $("batch-reset-btn");
+const batchCancelBtn = $("batch-cancel-btn");
+const batchRetryBtn = $("batch-retry-btn");
+const batchZipBtn = $("batch-zip-btn");
+const batchSummaryEl = $("batch-summary");
 const chooseOutputDirBtn = $("choose-output-dir-btn");
 
 // ---- App state ----
@@ -170,6 +193,22 @@ let refineLastPoint = null;
 let refinePreviewDebounceTimer = null;
 let refinePreviewRequestId = 0;
 let refineLocked = false; // true while an apply/undo/redo request is in flight
+// Edge sliders, in the sliders' own integer units (each is 0.1% of the
+// image's longer side - see `currentEdgeSpec`). Non-zero means an edge
+// adjustment is previewed on the canvas but not yet applied.
+let edgeShift = 0; // -20..20
+let edgeSmooth = 0; // 0..10
+let edgeFeather = 0; // 0..20
+let edgePreviewDebounceTimer = null;
+let edgePreviewRequestId = 0;
+
+// Batch mode: what the results list currently on screen is showing.
+// `entries[i]` is the i-th file of the batch (its position is also the
+// `index` the backend reports progress with); `options` and `outputDir` are
+// captured when the run starts so a retry produces consistent output.
+let batch = null; // { entries, options, outputDir } | null
+let batchBackgroundHex = null; // null = keep transparent
+let batchShadowPreset = "natural";
 
 function setStatus(text) {
   statusLine.textContent = text;
@@ -178,6 +217,8 @@ function setStatus(text) {
 function setBusy(isBusy) {
   busy = isBusy;
   for (const btn of document.querySelectorAll("button")) {
+    // Controls that must stay usable while work is running (batch Cancel).
+    if (btn.hasAttribute("data-keep-enabled")) continue;
     btn.disabled = isBusy;
   }
 }
@@ -547,6 +588,25 @@ singleResetBtn.addEventListener("click", () => {
   singleDropzone.hidden = false;
 });
 
+/** Writes the working image's alpha channel as a black-and-white mask file. */
+async function exportMask() {
+  if (busy) return;
+  setBusy(true);
+  try {
+    setStatus("Saving mask…");
+    const outputPath = await invoke("export_mask", { outputDir, exportFormat });
+    setStatus(`Saved mask to ${outputPath}`);
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  } finally {
+    setBusy(false);
+    if (!refineOverlay.hidden) updateRefineControls();
+  }
+}
+
+singleMaskBtn.addEventListener("click", exportMask);
+refineMaskBtn.addEventListener("click", exportMask);
+
 singleRevealBtn.addEventListener("click", () => {
   if (lastSingleOutputPath) {
     revealItemInDir(lastSingleOutputPath).catch(() => {
@@ -904,10 +964,10 @@ function loadImage(src) {
   });
 }
 
-function redrawRefineCanvasBase() {
+function redrawRefineCanvasBase(img = refineBaseImg) {
   const ctx = refineCanvas.getContext("2d");
   ctx.clearRect(0, 0, refineCanvas.width, refineCanvas.height);
-  if (refineBaseImg) ctx.drawImage(refineBaseImg, 0, 0, refineCanvas.width, refineCanvas.height);
+  if (img) ctx.drawImage(img, 0, 0, refineCanvas.width, refineCanvas.height);
 }
 
 /**
@@ -963,6 +1023,13 @@ function updateRefineStrokeButtons() {
   refineClearBtn.disabled = !hasPending;
   for (const el of refineModeRow.querySelectorAll(".bg-shadow-preset")) el.disabled = hasPending;
   for (const el of refineRestoreRow.querySelectorAll(".refine-restore-btn")) el.disabled = hasPending;
+  updateEdgeControls();
+}
+
+/** Re-derives every refine control's enabled state; call after `setBusy(false)`, which enables all buttons. */
+function updateRefineControls() {
+  updateRefineStrokeButtons();
+  updateRefineUndoRedoButtons();
 }
 
 function updateRefineUndoRedoButtons() {
@@ -971,7 +1038,8 @@ function updateRefineUndoRedoButtons() {
 }
 
 refineCanvas.addEventListener("pointerdown", (event) => {
-  if (refineLocked) return;
+  // An un-applied edge adjustment owns the canvas until it's applied or reset.
+  if (refineLocked || edgePending()) return;
   refinePointerDown = true;
   refineCanvas.setPointerCapture(event.pointerId);
   const p = canvasPointFromEvent(event);
@@ -1058,6 +1126,138 @@ refineBrushSizeInput.addEventListener("input", () => {
   refineBrushSizeLabel.textContent = `${refineBrushPercent}%`;
 });
 
+// ---- Edge adjustments (shift / smooth / feather) ----
+
+const EDGE_HINT_DEFAULT = edgeHint.textContent.replace(/\s+/g, " ").trim();
+
+/** Slider units are 0.1% of the image's longer side; the backend takes percentages. */
+function currentEdgeSpec() {
+  return { shiftPct: edgeShift / 10, smoothPct: edgeSmooth / 10, featherPct: edgeFeather / 10 };
+}
+
+function edgePending() {
+  return edgeShift !== 0 || edgeSmooth !== 0 || edgeFeather !== 0;
+}
+
+function formatEdgeAmount(units, signed) {
+  const sign = signed && units > 0 ? "+" : "";
+  return `${sign}${(units / 10).toFixed(1)}%`;
+}
+
+function renderEdgeLabels() {
+  edgeShiftLabel.textContent = formatEdgeAmount(edgeShift, true);
+  edgeSmoothLabel.textContent = formatEdgeAmount(edgeSmooth, false);
+  edgeFeatherLabel.textContent = formatEdgeAmount(edgeFeather, false);
+}
+
+/**
+ * Edge sliders are unavailable while brush strokes are pending (both would
+ * be competing previews of the same canvas) or a request is in flight, and
+ * painting is in turn blocked while an edge adjustment is pending.
+ */
+function updateEdgeControls() {
+  const hasStrokes = refineStrokes.length > 0;
+  const disabled = hasStrokes || refineLocked;
+  for (const el of [edgeShiftInput, edgeSmoothInput, edgeFeatherInput]) el.disabled = disabled;
+  const pending = edgePending();
+  edgeApplyBtn.disabled = disabled || !pending;
+  edgeResetBtn.disabled = disabled || !pending;
+  if (hasStrokes) {
+    edgeHint.textContent = "Apply or clear your brush strokes first to adjust the edge.";
+  } else if (pending) {
+    edgeHint.textContent = "Apply or reset this adjustment before painting again.";
+  } else {
+    edgeHint.textContent = EDGE_HINT_DEFAULT;
+  }
+}
+
+/** Zeroes the sliders and drops any in-flight preview, without touching the canvas. */
+function resetEdgeValues() {
+  clearTimeout(edgePreviewDebounceTimer);
+  edgePreviewRequestId++; // invalidate any in-flight preview response
+  edgeShift = 0;
+  edgeSmooth = 0;
+  edgeFeather = 0;
+  edgeShiftInput.value = "0";
+  edgeSmoothInput.value = "0";
+  edgeFeatherInput.value = "0";
+  renderEdgeLabels();
+}
+
+function scheduleEdgePreviewUpdate() {
+  clearTimeout(edgePreviewDebounceTimer);
+  if (!edgePending()) {
+    edgePreviewRequestId++;
+    refineLoading.hidden = true;
+    redrawRefineCanvasBase();
+    return;
+  }
+  refineLoading.hidden = false;
+  edgePreviewDebounceTimer = setTimeout(updateEdgePreview, 120);
+}
+
+async function updateEdgePreview() {
+  const requestId = ++edgePreviewRequestId;
+  try {
+    const dataUrl = await invoke("preview_edges", { edges: currentEdgeSpec() });
+    if (requestId !== edgePreviewRequestId) return; // superseded by a newer request
+    const img = await loadImage(dataUrl);
+    if (requestId !== edgePreviewRequestId) return;
+    redrawRefineCanvasBase(img);
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  } finally {
+    if (requestId === edgePreviewRequestId) refineLoading.hidden = true;
+  }
+}
+
+function onEdgeSliderInput() {
+  edgeShift = Number(edgeShiftInput.value);
+  edgeSmooth = Number(edgeSmoothInput.value);
+  edgeFeather = Number(edgeFeatherInput.value);
+  renderEdgeLabels();
+  updateEdgeControls();
+  scheduleEdgePreviewUpdate();
+}
+
+edgeShiftInput.addEventListener("input", onEdgeSliderInput);
+edgeSmoothInput.addEventListener("input", onEdgeSliderInput);
+edgeFeatherInput.addEventListener("input", onEdgeSliderInput);
+
+edgeResetBtn.addEventListener("click", () => {
+  resetEdgeValues();
+  refineLoading.hidden = true;
+  redrawRefineCanvasBase();
+  updateEdgeControls();
+});
+
+edgeApplyBtn.addEventListener("click", async () => {
+  if (!edgePending() || busy) return;
+  clearTimeout(edgePreviewDebounceTimer);
+  edgePreviewRequestId++; // invalidate any in-flight preview response
+  setBusy(true);
+  refineLocked = true;
+  updateEdgeControls();
+  refineLoading.hidden = false;
+  try {
+    const dataUrl = await invoke("apply_edges", { edges: currentEdgeSpec() });
+    refineUndoDepth = Math.min(refineUndoDepth + 1, 15);
+    refineRedoDepth = 0;
+    refineBaseImg = await loadImage(dataUrl);
+    resetEdgeValues();
+    redrawRefineCanvasBase();
+    previewAfter.src = dataUrl;
+    setStatus("Applied edge adjustment.");
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  } finally {
+    refineLoading.hidden = true;
+    refineLocked = false;
+    setBusy(false);
+    updateRefineControls();
+  }
+});
+
 refineClearBtn.addEventListener("click", () => {
   clearTimeout(refinePreviewDebounceTimer);
   refinePreviewRequestId++; // invalidate any in-flight preview response
@@ -1095,6 +1295,9 @@ refineApplyBtn.addEventListener("click", async () => {
     refineLoading.hidden = true;
     refineLocked = false;
     setBusy(false);
+    // `setBusy(false)` enables every button; put the refine panel's own
+    // enabled/disabled state back.
+    updateRefineControls();
   }
 });
 
@@ -1107,6 +1310,7 @@ refineUndoBtn.addEventListener("click", async () => {
     const dataUrl = await invoke("undo_refine");
     refineUndoDepth -= 1;
     refineRedoDepth = Math.min(refineRedoDepth + 1, 15);
+    resetEdgeValues();
     refineBaseImg = await loadImage(dataUrl);
     redrawRefineCanvasBase();
     previewAfter.src = dataUrl;
@@ -1117,6 +1321,9 @@ refineUndoBtn.addEventListener("click", async () => {
     refineLoading.hidden = true;
     refineLocked = false;
     setBusy(false);
+    // `setBusy(false)` enables every button; put the refine panel's own
+    // enabled/disabled state back.
+    updateRefineControls();
   }
 });
 
@@ -1129,6 +1336,7 @@ refineRedoBtn.addEventListener("click", async () => {
     const dataUrl = await invoke("redo_refine");
     refineRedoDepth -= 1;
     refineUndoDepth = Math.min(refineUndoDepth + 1, 15);
+    resetEdgeValues();
     refineBaseImg = await loadImage(dataUrl);
     redrawRefineCanvasBase();
     previewAfter.src = dataUrl;
@@ -1139,6 +1347,9 @@ refineRedoBtn.addEventListener("click", async () => {
     refineLoading.hidden = true;
     refineLocked = false;
     setBusy(false);
+    // `setBusy(false)` enables every button; put the refine panel's own
+    // enabled/disabled state back.
+    updateRefineControls();
   }
 });
 
@@ -1157,6 +1368,7 @@ refineDownloadBtn.addEventListener("click", async () => {
     setStatus(`Failed: ${err}`);
   } finally {
     setBusy(false);
+    updateRefineControls();
   }
 });
 
@@ -1168,6 +1380,7 @@ singleRefineBtn.addEventListener("click", async () => {
   refineCurrentStroke = null;
   refineUndoDepth = 0;
   refineRedoDepth = 0;
+  resetEdgeValues();
 
   refineBrushSizeInput.value = "10";
   refineBrushSizeLabel.textContent = "10%";
@@ -1230,8 +1443,9 @@ batchPickFolderBtn.addEventListener("click", async () => {
 });
 
 batchResetBtn.addEventListener("click", () => {
+  batch = null;
   batchResult.hidden = true;
-  batchDropzone.hidden = false;
+  setBatchSetupVisible(true);
   batchFileList.innerHTML = "";
 });
 
@@ -1244,6 +1458,90 @@ batchRevealBtn.addEventListener("click", () => {
     });
   }
 });
+
+// ---- Batch options (background, shadow, file name) ----
+
+/** The options card and drop zone are shown together, and hidden once a run starts. */
+function setBatchSetupVisible(visible) {
+  batchDropzone.hidden = !visible;
+  batchOptionsEl.hidden = !visible;
+}
+
+/** The default file name changes from `-nobg` to `-bg` once a background or shadow is applied. */
+function updateBatchNamePlaceholder() {
+  const compositing = batchBackgroundHex !== null || batchShadowEnable.checked;
+  batchNameTemplateInput.placeholder = compositing ? "{name}-bg" : "{name}-nobg";
+}
+
+function buildBatchSwatches() {
+  batchSwatchesEl.innerHTML = "";
+  const select = (hex, el) => {
+    batchBackgroundHex = hex;
+    for (const swatch of batchSwatchesEl.querySelectorAll(".swatch")) swatch.classList.remove("selected");
+    el.classList.add("selected");
+    updateBatchNamePlaceholder();
+  };
+
+  const transparentBtn = document.createElement("button");
+  transparentBtn.type = "button";
+  transparentBtn.className = "swatch transparent-swatch selected";
+  transparentBtn.title = "Transparent";
+  transparentBtn.addEventListener("click", () => select(null, transparentBtn));
+  batchSwatchesEl.appendChild(transparentBtn);
+
+  for (const hex of [...BASIC_COLORS, ...PASTEL_COLORS]) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch";
+    btn.style.background = hex;
+    btn.title = hex;
+    btn.addEventListener("click", () => select(hex, btn));
+    batchSwatchesEl.appendChild(btn);
+  }
+
+  const customInput = document.createElement("input");
+  customInput.type = "color";
+  customInput.className = "swatch custom-swatch";
+  customInput.title = "Custom color";
+  customInput.value = "#8855ee";
+  customInput.addEventListener("input", () => select(customInput.value, customInput));
+  batchSwatchesEl.appendChild(customInput);
+}
+
+batchShadowEnable.addEventListener("change", () => {
+  batchShadowControls.hidden = !batchShadowEnable.checked;
+  updateBatchNamePlaceholder();
+});
+
+batchShadowPresetsEl.addEventListener("click", (event) => {
+  const btn = event.target.closest(".bg-shadow-preset");
+  if (!btn) return;
+  batchShadowPreset = btn.dataset.preset;
+  for (const el of batchShadowPresetsEl.querySelectorAll(".bg-shadow-preset")) {
+    el.classList.toggle("active", el === btn);
+  }
+});
+
+batchShadowOpacityInput.addEventListener("input", () => {
+  batchShadowOpacityLabel.textContent = `${batchShadowOpacityInput.value}%`;
+});
+
+function readBatchOptions() {
+  return {
+    backgroundHex: batchBackgroundHex,
+    shadow: batchShadowEnable.checked
+      ? {
+          preset: batchShadowPreset,
+          opacity: Number(batchShadowOpacityInput.value),
+          angleDeg: null,
+          distancePct: null,
+        }
+      : null,
+    nameTemplate: batchNameTemplateInput.value.trim() || null,
+  };
+}
+
+// ---- Batch run ----
 
 function renderBatchRow(fileName) {
   const li = document.createElement("li");
@@ -1284,80 +1582,238 @@ async function showBeforeThumb(thumbEl, path) {
   }
 }
 
+/** Entry states: "pending" (waiting/running), "done", "error", "cancelled" (never ran). */
+function batchCounts() {
+  const counts = { pending: 0, done: 0, error: 0, cancelled: 0, total: 0 };
+  for (const entry of batch?.entries ?? []) {
+    counts[entry.status] += 1;
+    counts.total += 1;
+  }
+  return counts;
+}
+
+function refreshBatchProgress() {
+  const { done, error, total } = batchCounts();
+  const finished = done + error;
+  batchProgressFill.style.width = `${total > 0 ? (finished / total) * 100 : 0}%`;
+  batchProgressLabel.textContent = `${finished} / ${total}`;
+}
+
+/** Updates the summary line and the Retry / ZIP buttons from the entries' states. */
+function updateBatchButtons() {
+  const counts = batchCounts();
+  const retryable = counts.error + counts.cancelled;
+
+  const parts = [];
+  if (counts.done > 0) parts.push(`${counts.done} done`);
+  if (counts.error > 0) parts.push(`${counts.error} failed`);
+  if (counts.cancelled > 0) parts.push(`${counts.cancelled} not processed`);
+  batchSummaryEl.textContent = parts.join(" · ");
+
+  batchRetryBtn.hidden = busy || retryable === 0;
+  batchRetryBtn.textContent =
+    counts.cancelled === 0 ? `Retry failed (${retryable})` : `Process remaining (${retryable})`;
+  // Android has no save-file dialog (see IS_ANDROID); outputs are already
+  // published to the Gallery there.
+  batchZipBtn.hidden = IS_ANDROID || busy || counts.done === 0;
+}
+
+function showEntryDone(entry, outputPath, afterDataUrl) {
+  const { thumbEl, statusEl } = entry.row;
+  entry.status = "done";
+  entry.outputPath = outputPath;
+  entry.message = null;
+  lastBatchOutputDir = parentDir(outputPath);
+  thumbEl.dataset.settled = "1";
+  statusEl.textContent = "Done";
+  statusEl.className = "file-status done";
+  statusEl.title = "";
+  thumbEl.innerHTML = "";
+  thumbEl.classList.add("checkerboard");
+  const img = document.createElement("img");
+  img.src = afterDataUrl;
+  img.alt = "";
+  thumbEl.appendChild(img);
+}
+
+function showEntryError(entry, message) {
+  const { thumbEl, statusEl } = entry.row;
+  entry.status = "error";
+  entry.outputPath = null;
+  entry.message = message ?? "Failed";
+  thumbEl.dataset.settled = "1";
+  thumbEl.classList.remove("checkerboard");
+  statusEl.textContent = entry.message;
+  statusEl.className = "file-status error";
+  statusEl.title = entry.message;
+  thumbEl.innerHTML = '<span class="file-thumb-error">!</span>';
+}
+
+function showEntryCancelled(entry, text) {
+  const { thumbEl, statusEl } = entry.row;
+  entry.status = "cancelled";
+  thumbEl.dataset.settled = "1";
+  statusEl.textContent = text;
+  statusEl.className = "file-status pending";
+  // Keep the "before" picture, but stop implying it's still being worked on.
+  for (const el of thumbEl.querySelectorAll(".file-thumb-overlay, .file-thumb-spinner")) el.remove();
+}
+
+/** Puts a row back to "Waiting…" with its original image, ready to be re-run. */
+function resetEntryForRetry(entry) {
+  const { thumbEl, statusEl } = entry.row;
+  entry.status = "pending";
+  entry.message = null;
+  delete thumbEl.dataset.settled;
+  thumbEl.classList.remove("checkerboard");
+  thumbEl.innerHTML = '<span class="file-thumb-spinner"></span>';
+  statusEl.textContent = "Waiting…";
+  statusEl.className = "file-status pending";
+  statusEl.title = "";
+  showBeforeThumb(thumbEl, entry.path);
+}
+
+/**
+ * Runs the backend batch for the entries at `indices` (positions in
+ * `batch.entries`), updating rows as `batch-progress` events arrive.
+ * Entries that never got a result - the user cancelled, or the run failed
+ * outright - end up "cancelled" so they can be retried.
+ */
+async function runBatch(indices) {
+  const { entries, options, outputDir: runOutputDir } = batch;
+
+  const unlisten = await listen("batch-progress", (event) => {
+    const { index, status, outputPath, afterDataUrl, message } = event.payload;
+    const entry = entries[index];
+    if (!entry) return;
+    if (status === "done") {
+      showEntryDone(entry, outputPath, afterDataUrl);
+    } else {
+      showEntryError(entry, message);
+    }
+    refreshBatchProgress();
+  });
+
+  let notRunText = "Not processed";
+  batchCancelBtn.disabled = false;
+  batchCancelBtn.hidden = false;
+  try {
+    setStatus("Removing backgrounds…");
+    const summary = await invoke("remove_background_batch", {
+      inputPaths: indices.map((i) => entries[i].path),
+      positions: indices,
+      total: entries.length,
+      reservedOutputs: entries.filter((e) => e.status === "done").map((e) => e.outputPath),
+      outputDir: runOutputDir,
+      modelKey: selectedModelKey,
+      exportFormat,
+      options,
+    });
+    if (summary.cancelled) notRunText = "Cancelled";
+    setStatus(summary.cancelled ? "Batch cancelled." : "Batch complete.");
+  } finally {
+    unlisten();
+    batchCancelBtn.hidden = true;
+    for (const i of indices) {
+      if (entries[i].status === "pending") showEntryCancelled(entries[i], notRunText);
+    }
+  }
+}
+
 async function processBatch(paths) {
   if (busy) return;
   setBusy(true);
+  batch = null;
   batchFileList.innerHTML = "";
   batchProgressFill.style.width = "0%";
   batchProgressLabel.textContent = "";
+  batchSummaryEl.textContent = "";
+  batchRetryBtn.hidden = true;
+  batchZipBtn.hidden = true;
 
-  batchDropzone.hidden = true;
+  setBatchSetupVisible(false);
   batchResult.hidden = false;
-
-  const rowsByIndex = [];
-
-  const unlisten = await listen("batch-progress", (event) => {
-    const { index, total, fileName, status, outputPath, afterDataUrl, message } = event.payload;
-
-    let row = rowsByIndex[index];
-    if (!row) {
-      row = renderBatchRow(fileName);
-      rowsByIndex[index] = row;
-    }
-    const { thumbEl, statusEl } = row;
-
-    thumbEl.dataset.settled = "1";
-    if (status === "done") {
-      statusEl.textContent = "Done";
-      statusEl.className = "file-status done";
-      lastBatchOutputDir = parentDir(outputPath);
-      thumbEl.innerHTML = "";
-      thumbEl.classList.add("checkerboard");
-      const img = document.createElement("img");
-      img.src = afterDataUrl;
-      img.alt = "";
-      thumbEl.appendChild(img);
-    } else {
-      statusEl.textContent = message ?? "Failed";
-      statusEl.className = "file-status error";
-      statusEl.title = message ?? "";
-      thumbEl.innerHTML = '<span class="file-thumb-error">!</span>';
-    }
-
-    const done = index + 1;
-    const pct = total > 0 ? (done / total) * 100 : 0;
-    batchProgressFill.style.width = `${pct}%`;
-    batchProgressLabel.textContent = `${done} / ${total}`;
-  });
 
   try {
     setStatus("Preparing…");
     const expandedPaths = await invoke("expand_batch_paths", { paths });
-    for (const [index, filePath] of expandedPaths.entries()) {
-      const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
-      const row = renderBatchRow(fileName);
-      rowsByIndex[index] = row;
-      showBeforeThumb(row.thumbEl, filePath);
-    }
-    batchProgressLabel.textContent = `0 / ${expandedPaths.length}`;
+    const entries = expandedPaths.map((path) => {
+      const name = path.split(/[/\\]/).pop() ?? path;
+      const row = renderBatchRow(name);
+      showBeforeThumb(row.thumbEl, path);
+      return { path, name, row, status: "pending", outputPath: null, message: null };
+    });
+    batch = { entries, options: readBatchOptions(), outputDir };
+    batchProgressLabel.textContent = `0 / ${entries.length}`;
 
     await ensureModelReady(selectedModelKey);
-
-    setStatus("Removing backgrounds…");
-    await invoke("remove_background_batch", {
-      inputPaths: expandedPaths,
-      outputDir,
-      modelKey: selectedModelKey,
-      exportFormat,
-    });
-    setStatus("Batch complete.");
+    await runBatch(entries.map((_, i) => i));
   } catch (err) {
     setStatus(`Failed: ${err}`);
   } finally {
-    unlisten();
     setBusy(false);
+    updateBatchButtons();
   }
 }
+
+batchCancelBtn.addEventListener("click", async () => {
+  batchCancelBtn.disabled = true;
+  setStatus("Cancelling after the current image…");
+  try {
+    await invoke("cancel_batch");
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  }
+});
+
+batchRetryBtn.addEventListener("click", async () => {
+  if (busy || !batch) return;
+  const indices = batch.entries
+    .map((entry, i) => (entry.status === "error" || entry.status === "cancelled" ? i : -1))
+    .filter((i) => i >= 0);
+  if (indices.length === 0) return;
+
+  setBusy(true);
+  batchRetryBtn.hidden = true;
+  batchZipBtn.hidden = true;
+  for (const i of indices) resetEntryForRetry(batch.entries[i]);
+  refreshBatchProgress();
+  try {
+    await ensureModelReady(selectedModelKey);
+    await runBatch(indices);
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  } finally {
+    setBusy(false);
+    updateBatchButtons();
+  }
+});
+
+batchZipBtn.addEventListener("click", async () => {
+  if (busy || !batch) return;
+  const files = batch.entries.filter((e) => e.status === "done").map((e) => e.outputPath);
+  if (files.length === 0) return;
+
+  try {
+    const dir = lastBatchOutputDir ?? batch.outputDir;
+    const sep = dir && dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+    const picked = await save({
+      defaultPath: dir ? `${dir}${sep}unbagrnd-batch.zip` : "unbagrnd-batch.zip",
+      filters: [{ name: "ZIP archive", extensions: ["zip"] }],
+    });
+    if (!picked) return;
+
+    setBusy(true);
+    setStatus("Creating ZIP…");
+    const zipPath = await invoke("export_batch_zip", { files, zipPath: picked });
+    setStatus(`Saved ZIP to ${zipPath}`);
+  } catch (err) {
+    setStatus(`Failed: ${err}`);
+  } finally {
+    setBusy(false);
+    updateBatchButtons();
+  }
+});
 
 function parentDir(path) {
   if (!path) return null;
@@ -1389,7 +1845,13 @@ function activeDropzone() {
   // mode directly. Native backends do not report positions in consistent
   // coordinate units (notably Cocoa points on macOS), making hit-testing here
   // unreliable on Retina displays.
-  return dropzones.find((zone) => !zone.el.hidden) ?? null;
+  // Modes are switched by hiding the whole tab panel, not the dropzone itself,
+  // so both the zone and its panel have to be visible.
+  return (
+    dropzones.find(
+      (zone) => !zone.el.hidden && !zone.el.closest('[role="tabpanel"]').hidden,
+    ) ?? null
+  );
 }
 
 async function setupDragAndDrop() {
@@ -1440,6 +1902,7 @@ async function init() {
     .catch(() => {});
 
   activateTab("single");
+  buildBatchSwatches();
   refreshOutputDirDisplay();
   await setupDragAndDrop();
 

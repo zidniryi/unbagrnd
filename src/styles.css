@@ -713,6 +713,7 @@ main {
 
 .result-buttons {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
@@ -873,6 +874,14 @@ main {
   font-variant-numeric: tabular-nums;
   color: var(--text-muted);
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* A long status message (a saved file path has no break opportunities)
+   must wrap rather than widen the footer past the screen edge. */
+#status-line {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 @media (max-width: 560px) {
@@ -1167,6 +1176,86 @@ input[type="range"] {
   margin-top: 16px;
 }
 
+/* Refine panel: edge adjustments */
+.bg-editor-topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.edge-slider {
+  grid-template-columns: 56px 1fr 48px;
+}
+
+.edge-slider span {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Batch options (shown above the batch drop zone) */
+.batch-options {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-bottom: 14px;
+}
+
+.batch-options[hidden] {
+  display: none;
+}
+
+.batch-options > summary {
+  cursor: pointer;
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.batch-options-body {
+  padding: 4px 14px 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.batch-options-body > .swatch-group:first-child {
+  margin-top: 12px;
+}
+
+.batch-name-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.batch-name-field input {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  padding: 7px 10px;
+}
+
+.batch-name-field input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.batch-options code {
+  font-size: 12px;
+  background: var(--surface-alt);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+.batch-buttons {
+  flex-wrap: wrap;
+}
+
 @media (max-width: 720px) {
   .bg-editor-body {
     flex-direction: column;
@@ -1176,5 +1265,52 @@ input[type="range"] {
     width: 100%;
     border-left: none;
     border-top: 1px solid var(--border);
+    /* The sidebar now also holds the Edge controls; without a cap it
+       would squeeze the canvas to nothing on short phones. It scrolls
+       (overflow-y: auto) instead. */
+    max-height: 55vh;
+  }
+
+  /* With the sidebar stacked under it, the canvas gets what's left of the
+     screen; keep it from being taller than that (it'd be clipped and need
+     its own scrolling). */
+  #refine-canvas,
+  .bg-editor-canvas img {
+    max-height: calc(45vh - 110px);
+  }
+
+  /* Keep the last line of the footer clear of the gesture/navigation bar. */
+  .app-footer {
+    padding-bottom: max(28px, env(safe-area-inset-bottom));
+  }
+}
+
+/* Editor top bar: keep every control on one line on narrow phones. */
+.bg-editor-topbar .btn {
+  white-space: nowrap;
+}
+
+.label-short {
+  display: none;
+}
+
+@media (max-width: 480px) {
+  .bg-editor-topbar {
+    padding-left: 12px;
+    padding-right: 12px;
+    gap: 6px;
+  }
+
+  .bg-editor-topbar .btn {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .label-full {
+    display: none;
+  }
+
+  .label-short {
+    display: inline;
   }
 }

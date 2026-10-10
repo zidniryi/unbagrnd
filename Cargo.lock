@@ -5782,7 +5782,7 @@ dependencies = [
 
 [[package]]
 name = "unbagrnd"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "base64 0.23.1",
  "image",
@@ -5796,11 +5796,12 @@ dependencies = [
  "tauri-plugin-opener",
  "tokio",
  "unbagrnd-core",
+ "zip",
 ]
 
 [[package]]
 name = "unbagrnd-api"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "axum",
  "base64 0.23.1",
@@ -5828,7 +5829,7 @@ dependencies = [
 
 [[package]]
 name = "unbagrnd-core"
-version = "0.4.0"
+version = "0.5.0"
 dependencies = [
  "futures-util",
  "hex",

@@ -79,6 +79,7 @@
               <div class="result-buttons">
                 <button id="single-refine-btn" class="btn btn-secondary" type="button">Refine</button>
                 <button id="single-edit-bg-btn" class="btn btn-secondary" type="button">Edit background</button>
+                <button id="single-mask-btn" class="btn btn-secondary" type="button" title="Save the cutout's transparency as a black-and-white mask">Export mask</button>
                 <button id="single-reveal-btn" class="btn btn-secondary" type="button">Reveal in folder</button>
                 <button id="single-reset-btn" class="btn btn-secondary" type="button">Process another</button>
               </div>
@@ -87,6 +88,43 @@
         </section>
 
         <section id="panel-batch" class="panel" role="tabpanel" aria-labelledby="tab-batch" hidden>
+          <details id="batch-options" class="batch-options">
+            <summary>Batch options</summary>
+            <div class="batch-options-body">
+              <div class="swatch-group">
+                <span class="swatch-group-label">Background for every image</span>
+                <div class="swatch-row" id="batch-swatches"></div>
+              </div>
+
+              <label class="bg-shadow-toggle">
+                <input type="checkbox" id="batch-shadow-enable" />
+                Add a drop shadow
+              </label>
+              <div id="batch-shadow-controls" class="bg-shadow-controls" hidden>
+                <div class="bg-shadow-presets" id="batch-shadow-presets">
+                  <button type="button" class="bg-shadow-preset active" data-preset="natural">Natural</button>
+                  <button type="button" class="bg-shadow-preset" data-preset="overhead">Overhead</button>
+                  <button type="button" class="bg-shadow-preset" data-preset="left">Left</button>
+                  <button type="button" class="bg-shadow-preset" data-preset="right">Right</button>
+                </div>
+                <label class="bg-shadow-opacity">
+                  Opacity
+                  <input type="range" id="batch-shadow-opacity" min="0" max="100" value="50" />
+                  <span id="batch-shadow-opacity-label">50%</span>
+                </label>
+              </div>
+
+              <label class="batch-name-field">
+                <span class="swatch-group-label">File name</span>
+                <input type="text" id="batch-name-template" placeholder="{name}-nobg" spellcheck="false" autocomplete="off" />
+              </label>
+              <p class="bg-editor-hint">
+                <code>{name}</code> is the original file name and <code>{index}</code>
+                its position in the batch. Leave empty for the default.
+              </p>
+            </div>
+          </details>
+
           <div id="batch-dropzone" class="dropzone">
             <div class="dropzone-inner">
               <span class="dropzone-icon" aria-hidden="true">⬆</span>
@@ -108,8 +146,14 @@
             </div>
             <ul id="batch-file-list" class="file-list"></ul>
             <div class="result-actions">
-              <button id="batch-reveal-btn" class="btn btn-secondary" type="button">Reveal output folder</button>
-              <button id="batch-reset-btn" class="btn btn-secondary" type="button">Process another batch</button>
+              <span id="batch-summary" class="output-path"></span>
+              <div class="result-buttons batch-buttons">
+                <button id="batch-cancel-btn" class="btn btn-secondary" type="button" data-keep-enabled hidden>Cancel</button>
+                <button id="batch-retry-btn" class="btn btn-secondary" type="button" hidden>Retry failed</button>
+                <button id="batch-zip-btn" class="btn btn-secondary" type="button" hidden>Export ZIP…</button>
+                <button id="batch-reveal-btn" class="btn btn-secondary" type="button">Reveal output folder</button>
+                <button id="batch-reset-btn" class="btn btn-secondary" type="button">Process another batch</button>
+              </div>
             </div>
           </div>
         </section>
@@ -138,7 +182,10 @@
             <button id="refine-undo-btn" class="btn-icon" type="button" title="Undo" disabled>↶</button>
             <button id="refine-redo-btn" class="btn-icon" type="button" title="Redo" disabled>↷</button>
           </div>
-          <button id="refine-download-btn" class="btn btn-primary" type="button">Download</button>
+          <div class="bg-editor-topbar-right">
+            <button id="refine-mask-btn" class="btn btn-secondary" type="button" title="Save the cutout's transparency as a black-and-white mask"><span class="label-full">Download mask</span><span class="label-short">Mask</span></button>
+            <button id="refine-download-btn" class="btn btn-primary" type="button">Download</button>
+          </div>
         </div>
         <div class="bg-editor-body">
           <div class="bg-editor-canvas-wrap">
@@ -188,6 +235,33 @@
             <div class="refine-actions">
               <button id="refine-clear-btn" class="btn btn-link" type="button">Clear</button>
               <button id="refine-apply-btn" class="btn btn-secondary" type="button">Apply</button>
+            </div>
+
+            <div class="bg-editor-divider"></div>
+
+            <h3>Edge</h3>
+            <p class="bg-editor-hint" id="edge-hint">
+              Clean up the outline — handy for hair and fur. Shift
+              shrinks (−) or grows (+) the subject.
+            </p>
+            <label class="bg-shadow-opacity edge-slider">
+              Shift
+              <input type="range" id="edge-shift" min="-20" max="20" value="0" />
+              <span id="edge-shift-label">0.0%</span>
+            </label>
+            <label class="bg-shadow-opacity edge-slider">
+              Smooth
+              <input type="range" id="edge-smooth" min="0" max="10" value="0" />
+              <span id="edge-smooth-label">0.0%</span>
+            </label>
+            <label class="bg-shadow-opacity edge-slider">
+              Feather
+              <input type="range" id="edge-feather" min="0" max="20" value="0" />
+              <span id="edge-feather-label">0.0%</span>
+            </label>
+            <div class="refine-actions">
+              <button id="edge-reset-btn" class="btn btn-link" type="button" disabled>Reset</button>
+              <button id="edge-apply-btn" class="btn btn-secondary" type="button" disabled>Apply edge</button>
             </div>
           </aside>
         </div>

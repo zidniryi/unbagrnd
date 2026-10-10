@@ -33,9 +33,15 @@ internet access required after a one-time setup step.
   those one-time model downloads. Nothing else — no analytics, no update
   checks.
 - **Single and batch.** Process one image, or a whole folder, from the same
-  window.
+  window. Batches can apply one background color and drop shadow to every
+  image, name outputs from a template (`{name}`, `{index}`), be cancelled
+  mid-run, retry just the files that failed, and be exported as a ZIP.
 - **Refine by hand.** Brush over the result to erase or restore parts of the
   cutout, with undo/redo — for the spots the model gets almost right.
+- **Refine the edge.** Shift (shrink/grow), smooth, or feather the cutout's
+  outline with live preview — for hair and fur.
+- **Export the mask.** Save the cutout's alpha channel as a black-and-white
+  matte, for use as a layer mask in design tools.
 - **Edit the background.** Fill it with a solid color and add an on-device
   drop shadow, no AI or network involved.
 - **Export as PNG, WebP, or SVG.** Pick the output format in Settings.
@@ -54,6 +60,14 @@ internet access required after a one-time setup step.
 <p align="center">
   <img src="docs/screenshot-batch.png" alt="unbagrnd batch results" width="49%" />
   <img src="docs/screenshot-settings.png" alt="unbagrnd settings" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/screenshot-batch-options.png" alt="unbagrnd batch options: one background, drop shadow and file name template for every image" width="49%" />
+  <img src="docs/screenshot-batch-results.png" alt="unbagrnd batch results with ZIP export" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/screenshot-edge.png" alt="unbagrnd edge refinement: shift, smooth and feather" width="49%" />
+  <img src="docs/screenshot-mask.png" alt="unbagrnd alpha mask export" width="49%" />
 </p>
 <p align="center">
   <img src="docs/screenshot-android-home.png" alt="unbagrnd on Android" width="49%" />
@@ -437,6 +451,7 @@ unbagrnd/
       commands.rs              # Tauri commands exposed to the frontend
       models.rs                # thin AppHandle wrapper around core::models
       background.rs, refine.rs # background-fill/shadow and manual mask refine
+      matte.rs                 # alpha-matte export and edge shift/smooth/feather
       settings.rs, system_usage.rs
   api/                        # unbagrnd-api: self-hosted REST API - wraps core with Axum
     src/
@@ -464,3 +479,8 @@ release assets — see [How it works](#how-it-works) above.
 Issues and pull requests are welcome. This is a small, focused tool; the
 [non-negotiable constraints](#unbagrnd) above (local-only, free, offline
 after setup) apply to any contribution.
+
+## Support
+
+If unbagrnd saves you time, you can support its development on
+[Ko-fi](https://ko-fi.com/zidniryi).
