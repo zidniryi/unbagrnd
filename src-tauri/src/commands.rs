@@ -838,6 +838,14 @@ const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "bmp", "tif", 
 fn expand_paths(paths: &[String]) -> Result<Vec<String>, String> {
     let mut expanded = Vec::new();
     for raw_path in paths {
+        // A `content://` (Android picker) or other URI-scheme source isn't a
+        // filesystem path: stat-ing it always fails with ENOENT. It can
+        // only be a single file, and `open_image` reads it through the fs
+        // plugin's ContentResolver, so pass it through untouched.
+        if raw_path.contains("://") {
+            expanded.push(raw_path.clone());
+            continue;
+        }
         let path = Path::new(raw_path);
         let metadata = path
             .metadata()
@@ -1198,6 +1206,12 @@ mod tests {
         assert_eq!(render_name_template("...", "photo", 1, 1), "image");
         // The stem is inserted verbatim, never re-expanded as a token.
         assert_eq!(render_name_template("{index}-{name}", "{index}", 7, 1), "7-{index}");
+    }
+
+    #[test]
+    fn expand_paths_passes_content_uris_through() {
+        let uri = "content://media/picker_get_content/0/com.android.providers.media.photopicker/media/1000882056".to_string();
+        assert_eq!(expand_paths(&[uri.clone()]).unwrap(), vec![uri]);
     }
 
     #[test]

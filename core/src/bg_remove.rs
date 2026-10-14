@@ -10,6 +10,7 @@ use std::sync::Mutex;
 
 use image::{imageops::FilterType, ImageBuffer, Luma, Rgba, RgbaImage};
 use ndarray::Array4;
+use ort::ep;
 use ort::session::builder::GraphOptimizationLevel;
 use ort::session::Session;
 use ort::value::TensorRef;
@@ -50,8 +51,19 @@ fn build_session(model_path: &Path) -> Result<Session, String> {
         .map(|n| n.get())
         .unwrap_or(4);
 
+    // The CPU arena allocator and the memory-pattern planner both reserve
+    // large contiguous blocks up front and never hand them back. For the
+    // 1024px models (BiRefNet, IS-Net) that means single 800MB+ requests
+    // that fail with "BFCArena::AllocateRawInternal Failed to allocate
+    // memory" on machines with little free RAM. Turning both off makes ORT
+    // allocate each tensor on demand and free it as soon as it's dead, so
+    // peak usage is the real working set instead of an over-sized arena.
     Session::builder()
         .map_err(|e| format!("failed to initialize the inference session: {e}"))?
+        .with_execution_providers([ep::CPU::default().with_arena_allocator(false).build()])
+        .map_err(|e| format!("failed to configure the inference session: {e}"))?
+        .with_memory_pattern(false)
+        .map_err(|e| format!("failed to configure the inference session: {e}"))?
         .with_optimization_level(GraphOptimizationLevel::Level3)
         .map_err(|e| format!("failed to configure the inference session: {e}"))?
         .with_intra_threads(threads)
@@ -85,7 +97,16 @@ pub fn remove_background(
         let session = sessions
             .get_mut(spec.key)
             .expect("session was just inserted");
-        run_inference(session, spec, original)?
+        match run_inference(session, spec, original) {
+            Ok(mask) => mask,
+            Err(e) => {
+                // Drop the session so whatever memory it was holding is
+                // released and the next image starts from a clean slate
+                // instead of failing the same way again.
+                sessions.remove(spec.key);
+                return Err(friendly_inference_error(e));
+            }
+        }
     };
 
     let mask_full = image::imageops::resize(&mask_native, orig_w, orig_h, FilterType::Lanczos3);
@@ -99,6 +120,18 @@ pub fn remove_background(
     }
 
     Ok(out)
+}
+
+/// Adds an actionable hint to ONNX Runtime's raw out-of-memory failure.
+fn friendly_inference_error(message: String) -> String {
+    if message.contains("Failed to allocate memory") {
+        format!(
+            "not enough free memory for this model. Close other apps or pick a \
+             lighter model (e.g. Silueta). Details: {message}"
+        )
+    } else {
+        message
+    }
 }
 
 /// Runs one forward pass and returns the predicted alpha mask at the
