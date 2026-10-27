@@ -10,7 +10,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "unbagrnd — background remover",
+        "title": "Background Remover — PaperClip Add-on",
         "width": 1040,
         "height": 720,
         "minWidth": 760,
