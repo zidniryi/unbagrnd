@@ -1,7 +1,9 @@
 #[cfg(target_os = "android")]
 mod android_gallery;
 mod background;
+mod clipboard;
 mod commands;
+mod frame;
 mod matte;
 mod models;
 mod refine;
@@ -43,6 +45,10 @@ pub fn run() {
             commands::preview_image,
             commands::preview_background,
             commands::export_background,
+            commands::copy_result_to_clipboard,
+            commands::copy_background_to_clipboard,
+            commands::paste_clipboard_image,
+            commands::save_pasted_image,
             commands::preview_refine,
             commands::apply_refine,
             commands::undo_refine,

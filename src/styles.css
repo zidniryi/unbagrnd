@@ -1418,3 +1418,237 @@ input[type="range"] {
     transition: none;
   }
 }
+
+/* Paste */
+.dropzone-hint {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  margin-top: 10px !important;
+}
+
+.dropzone-hint[hidden] {
+  display: none;
+}
+
+kbd {
+  font-family: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface-alt);
+  color: var(--text);
+}
+
+/* Before/after: layout toggle + compare slider */
+.preview-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+
+.preview-toolbar .bg-shadow-presets {
+  grid-template-columns: repeat(2, auto);
+  margin-bottom: 0;
+}
+
+.preview-toolbar .bg-shadow-preset {
+  padding: 6px 12px;
+}
+
+.preview-grid[hidden],
+.compare[hidden] {
+  display: none;
+}
+
+.compare {
+  display: flex;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 10px;
+}
+
+.compare-frame {
+  --pos: 50%;
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+
+.compare-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  pointer-events: none;
+}
+
+.compare-frame .compare-before {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+  clip-path: inset(0 calc(100% - var(--pos)) 0 0);
+}
+
+.compare-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--pos);
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
+
+.compare-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 32px;
+  height: 32px;
+  margin: -16px 0 0 -16px;
+  border-radius: 50%;
+  background: #fff;
+  color: #142019;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.compare-label {
+  position: absolute;
+  top: 8px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+}
+
+.compare-label-before {
+  left: 8px;
+}
+
+.compare-label-after {
+  right: 8px;
+}
+
+/* The range input covers the whole frame invisibly: dragging anywhere
+   moves the divider, and it stays keyboard-accessible for free. */
+.compare-range {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: ew-resize;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.compare-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 32px;
+  height: 100vh;
+}
+
+.compare-frame:has(.compare-range:focus-visible) .compare-knob {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Gradient + size controls (background editor and batch options) */
+.swatch.gradient-swatch {
+  border-radius: 8px;
+}
+
+.bg-gradient-controls[hidden] {
+  display: none;
+}
+
+.bg-gradient-controls {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 12px;
+  margin-bottom: 4px;
+}
+
+.bg-gradient-controls .bg-shadow-opacity {
+  grid-column: 1 / -1;
+}
+
+.bg-gradient-color {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.bg-gradient-color input[type="color"] {
+  width: 36px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: none;
+  cursor: pointer;
+}
+
+.size-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface-alt);
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%), linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position: calc(100% - 16px) center, calc(100% - 11px) center;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 7px 28px 7px 10px;
+}
+
+.size-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#bg-size-hint:empty {
+  display: none;
+}
+
+#bg-size-hint {
+  margin-top: 6px;
+}
+
+.bg-shadow-opacity[hidden] {
+  display: none;
+}

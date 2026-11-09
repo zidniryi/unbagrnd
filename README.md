@@ -33,8 +33,8 @@ internet access required after a one-time setup step.
   those one-time model downloads. Nothing else — no analytics, no update
   checks.
 - **Single and batch.** Process one image, or a whole folder, from the same
-  window. Batches can apply one background color and drop shadow to every
-  image, name outputs from a template (`{name}`, `{index}`), be cancelled
+  window. Batches can apply one background color or gradient, drop shadow
+  and output size to every image, name outputs from a template (`{name}`, `{index}`), be cancelled
   mid-run, retry just the files that failed, and be exported as a ZIP.
 - **Refine by hand.** Brush over the result to erase or restore parts of the
   cutout, with undo/redo — for the spots the model gets almost right.
@@ -42,8 +42,20 @@ internet access required after a one-time setup step.
   outline with live preview — for hair and fur.
 - **Export the mask.** Save the cutout's alpha channel as a black-and-white
   matte, for use as a layer mask in design tools.
-- **Edit the background.** Fill it with a solid color and add an on-device
-  drop shadow, no AI or network involved.
+- **Paste and copy.** Press ⌘V / Ctrl+V (or click "Paste image") to process
+  a screenshot or copied image straight from the clipboard, and copy the
+  cutout — or the finished, edited image — back to it, transparency intact.
+  Desktop only; on Android a long-press paste works too.
+- **Edit the background.** Fill it with a solid color or a linear gradient
+  (preset or your own colors and angle), and add an on-device drop shadow,
+  no AI or network involved.
+- **Crop and size presets.** Crop to the subject with adjustable padding,
+  or fit it into a fixed output size: marketplace squares (1000×1000,
+  2000×2000), ID photos / pas foto (2×3, 3×4, 4×6 cm at 300 dpi, with red and
+  blue backdrops), Instagram post/portrait, 9:16 stories, and 512×512
+  WhatsApp stickers. Works for single images and whole batches.
+- **Before/after compare.** View the result side by side with the original,
+  or on one image with a draggable divider.
 - **Export as PNG, WebP, or SVG.** Pick the output format in Settings.
 - **Cross-platform.** macOS, Windows, Linux, and Android.
 

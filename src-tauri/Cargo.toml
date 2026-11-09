@@ -1,6 +1,6 @@
 [package]
 name = "unbagrnd"
-version = "0.5.6"
+version = "0.6.0"
 description = "Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
 authors = ["zidniryi"]
 license = "MIT"
@@ -52,3 +52,10 @@ sysinfo = "0.33"
 # deflated (PNG/WebP are already compressed), so no compression backends are
 # needed.
 zip = { version = "3", default-features = false }
+
+# Pasting an image from / copying a result to the system clipboard. Desktop
+# only - it has no mobile backend; Android pastes through the webview's DOM
+# paste event instead. `wayland-data-control` lets it work on Wayland
+# sessions too, not just X11.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+arboard = { version = "3", default-features = false, features = ["image-data", "wayland-data-control"] }

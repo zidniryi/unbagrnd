@@ -48,7 +48,11 @@
               <span class="dropzone-icon" aria-hidden="true">⬆</span>
               <p>Drag &amp; drop an image here</p>
               <p class="dropzone-sub">or</p>
-              <button id="single-pick-btn" class="btn btn-secondary" type="button">Choose an image…</button>
+              <div class="dropzone-buttons">
+                <button id="single-pick-btn" class="btn btn-secondary" type="button">Choose an image…</button>
+                <button id="single-paste-btn" class="btn btn-secondary" type="button">Paste image</button>
+              </div>
+              <p id="single-paste-hint" class="dropzone-hint">or press <kbd id="paste-shortcut">Ctrl+V</kbd> anywhere</p>
             </div>
           </div>
 
@@ -64,7 +68,13 @@
           </div>
 
           <div id="single-result" class="result" hidden>
-            <div class="preview-grid">
+            <div class="preview-toolbar">
+              <div class="bg-shadow-presets" id="preview-view-toggle" role="group" aria-label="Preview layout">
+                <button type="button" class="bg-shadow-preset active" data-view="split">Side by side</button>
+                <button type="button" class="bg-shadow-preset" data-view="compare">Compare</button>
+              </div>
+            </div>
+            <div class="preview-grid" id="preview-grid">
               <figure class="preview">
                 <figcaption>Before</figcaption>
                 <div class="preview-frame"><img id="preview-before" alt="Original image" /></div>
@@ -74,9 +84,20 @@
                 <div class="preview-frame checkerboard"><img id="preview-after" alt="Background removed" /></div>
               </figure>
             </div>
+            <div class="compare" id="preview-compare" hidden>
+              <div class="compare-frame checkerboard" id="compare-frame" style="--pos: 50%">
+                <img id="compare-after" alt="Background removed" draggable="false" />
+                <img id="compare-before" class="compare-before" alt="Original image" draggable="false" />
+                <div class="compare-divider" aria-hidden="true"><span class="compare-knob">⇔</span></div>
+                <span class="compare-label compare-label-before" aria-hidden="true">Before</span>
+                <span class="compare-label compare-label-after" aria-hidden="true">After</span>
+                <input type="range" id="compare-range" class="compare-range" min="0" max="100" step="0.1" value="50" aria-label="Before/after divider position" />
+              </div>
+            </div>
             <div class="result-actions">
               <span id="single-output-path" class="output-path"></span>
               <div class="result-buttons">
+                <button id="single-copy-btn" class="btn btn-secondary" type="button" title="Copy the cutout to the clipboard">Copy</button>
                 <button id="single-refine-btn" class="btn btn-secondary" type="button">Refine</button>
                 <button id="single-edit-bg-btn" class="btn btn-secondary" type="button">Edit background</button>
                 <button id="single-mask-btn" class="btn btn-secondary" type="button" title="Save the cutout's transparency as a black-and-white mask">Export mask</button>
@@ -113,6 +134,16 @@
                   <span id="batch-shadow-opacity-label">50%</span>
                 </label>
               </div>
+
+              <div class="swatch-group">
+                <span class="swatch-group-label">Size</span>
+                <select id="batch-size-select" class="size-select"></select>
+              </div>
+              <label class="bg-shadow-opacity" id="batch-padding-row" hidden>
+                Padding
+                <input type="range" id="batch-padding" min="0" max="50" value="0" />
+                <span id="batch-padding-label">0%</span>
+              </label>
 
               <label class="batch-name-field">
                 <span class="swatch-group-label">File name</span>
@@ -272,7 +303,10 @@
       <div class="bg-editor">
         <div class="bg-editor-topbar">
           <button id="bg-editor-done-btn" class="btn btn-secondary" type="button">Done</button>
-          <button id="bg-editor-download-btn" class="btn btn-primary" type="button">Download</button>
+          <div class="bg-editor-topbar-right">
+            <button id="bg-editor-copy-btn" class="btn btn-secondary" type="button" title="Copy the result to the clipboard">Copy</button>
+            <button id="bg-editor-download-btn" class="btn btn-primary" type="button">Download</button>
+          </div>
         </div>
         <div class="bg-editor-body">
           <div class="bg-editor-canvas-wrap">
@@ -301,6 +335,47 @@
               <span class="swatch-group-label">From your image</span>
               <div class="swatch-row" id="bg-swatches-image"></div>
             </div>
+            <div class="swatch-group">
+              <span class="swatch-group-label">ID photo</span>
+              <div class="swatch-row" id="bg-swatches-id"></div>
+            </div>
+            <div class="swatch-group">
+              <span class="swatch-group-label">Gradients</span>
+              <div class="swatch-row" id="bg-swatches-gradient"></div>
+            </div>
+            <div id="bg-gradient-controls" class="bg-gradient-controls" hidden>
+              <label class="bg-gradient-color">
+                From
+                <input type="color" id="bg-gradient-from" />
+              </label>
+              <label class="bg-gradient-color">
+                To
+                <input type="color" id="bg-gradient-to" />
+              </label>
+              <label class="bg-shadow-opacity">
+                Angle
+                <input type="range" id="bg-gradient-angle" min="0" max="359" value="180" />
+                <span id="bg-gradient-angle-label">180°</span>
+              </label>
+            </div>
+
+            <div class="bg-editor-divider"></div>
+
+            <h3>Size &amp; crop</h3>
+            <div class="swatch-group">
+              <span class="swatch-group-label">Output size</span>
+              <select id="bg-size-select" class="size-select"></select>
+            </div>
+            <p class="bg-editor-hint" id="bg-size-hint"></p>
+            <label class="bg-shadow-toggle">
+              <input type="checkbox" id="bg-crop-enable" />
+              Crop to subject
+            </label>
+            <label class="bg-shadow-opacity">
+              Padding
+              <input type="range" id="bg-padding" min="0" max="50" value="0" />
+              <span id="bg-padding-label">0%</span>
+            </label>
 
             <div class="bg-editor-divider"></div>
 

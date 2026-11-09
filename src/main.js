@@ -25,6 +25,7 @@ const LARGE_MODEL_THRESHOLD = 100 * 1024 * 1024;
 // custom-output-folder UI is simply hidden there instead of silently
 // failing when tapped.
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
+const IS_MAC = /Mac/i.test(navigator.platform || navigator.userAgent);
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,6 +75,16 @@ const singleResetBtn = $("single-reset-btn");
 const singleEditBgBtn = $("single-edit-bg-btn");
 const singleRefineBtn = $("single-refine-btn");
 const singleMaskBtn = $("single-mask-btn");
+const singleCopyBtn = $("single-copy-btn");
+const singlePasteBtn = $("single-paste-btn");
+const singlePasteHint = $("single-paste-hint");
+const previewViewToggle = $("preview-view-toggle");
+const previewGrid = $("preview-grid");
+const previewCompare = $("preview-compare");
+const compareFrame = $("compare-frame");
+const compareBefore = $("compare-before");
+const compareAfter = $("compare-after");
+const compareRange = $("compare-range");
 
 // ---- Refine editor ----
 const refineOverlay = $("refine-editor-overlay");
@@ -110,6 +121,19 @@ const bgEditorPreview = $("bg-editor-preview");
 const bgEditorLoading = $("bg-editor-loading");
 const bgEditorDoneBtn = $("bg-editor-done-btn");
 const bgEditorDownloadBtn = $("bg-editor-download-btn");
+const bgEditorCopyBtn = $("bg-editor-copy-btn");
+const bgSwatchesId = $("bg-swatches-id");
+const bgSwatchesGradient = $("bg-swatches-gradient");
+const bgGradientControls = $("bg-gradient-controls");
+const bgGradientFromInput = $("bg-gradient-from");
+const bgGradientToInput = $("bg-gradient-to");
+const bgGradientAngleInput = $("bg-gradient-angle");
+const bgGradientAngleLabel = $("bg-gradient-angle-label");
+const bgSizeSelect = $("bg-size-select");
+const bgSizeHint = $("bg-size-hint");
+const bgCropEnable = $("bg-crop-enable");
+const bgPaddingInput = $("bg-padding");
+const bgPaddingLabel = $("bg-padding-label");
 const bgSwatchesBasic = $("bg-swatches-basic");
 const bgSwatchesPastel = $("bg-swatches-pastel");
 const bgSwatchesNeutral = $("bg-swatches-neutral");
@@ -133,6 +157,10 @@ const batchShadowPresetsEl = $("batch-shadow-presets");
 const batchShadowOpacityInput = $("batch-shadow-opacity");
 const batchShadowOpacityLabel = $("batch-shadow-opacity-label");
 const batchNameTemplateInput = $("batch-name-template");
+const batchSizeSelect = $("batch-size-select");
+const batchPaddingRow = $("batch-padding-row");
+const batchPaddingInput = $("batch-padding");
+const batchPaddingLabel = $("batch-padding-label");
 const batchDropzone = $("batch-dropzone");
 const batchPickFilesBtn = $("batch-pick-files-btn");
 const batchPickFolderBtn = $("batch-pick-folder-btn");
@@ -160,7 +188,11 @@ let lastBatchOutputDir = null;
 let busy = false;
 
 // Background editor state (single-image mode only).
-let bgBackgroundHex = null; // null = transparent
+let bgBackgroundHex = null; // null = transparent (or a gradient is set)
+let bgGradient = null; // { from, to, angleDeg } | null; takes precedence over bgBackgroundHex
+let bgSizeKey = "original"; // key into SIZE_PRESETS
+let bgCropToSubject = false;
+let bgPaddingPct = 0; // 0-50, % of the subject's longer side
 let bgShadowEnabled = false;
 let bgShadowPreset = "natural"; // "natural" | "overhead" | "left" | "right" | "custom"
 let bgShadowOpacity = 50;
@@ -208,6 +240,7 @@ let edgePreviewRequestId = 0;
 // captured when the run starts so a retry produces consistent output.
 let batch = null; // { entries, options, outputDir } | null
 let batchBackgroundHex = null; // null = keep transparent
+let batchGradient = null; // { from, to, angleDeg } | null
 let batchShadowPreset = "natural";
 
 function setStatus(text) {
@@ -725,6 +758,166 @@ singleRevealBtn.addEventListener("click", () => {
   revealSavedFile(lastSingleOutputPath);
 });
 
+/** Runs a clipboard copy command, with the usual busy/status/toast handling. */
+async function copyToClipboard(command, args = {}) {
+  if (busy) return;
+  setBusy(true);
+  try {
+    setStatus("Copying…");
+    await invoke(command, args);
+    setStatus("Copied to the clipboard.");
+    showToast("Copied to the clipboard");
+  } catch (err) {
+    setStatus(`Copy failed: ${err}`);
+    showToast(`Copy failed: ${err}`, { kind: "error" });
+  } finally {
+    setBusy(false);
+  }
+}
+
+singleCopyBtn.addEventListener("click", () => copyToClipboard("copy_result_to_clipboard"));
+
+// ---- Paste (Cmd/Ctrl+V or the "Paste image" button) ----
+
+/** File name for a pasted image, after the local time: `pasted-20261109-143005`. */
+function pastedFileStem() {
+  const d = new Date();
+  const two = (n) => String(n).padStart(2, "0");
+  return `pasted-${d.getFullYear()}${two(d.getMonth() + 1)}${two(d.getDate())}-${two(d.getHours())}${two(d.getMinutes())}${two(d.getSeconds())}`;
+}
+
+function isEditableTarget(target) {
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    Boolean(target?.isContentEditable)
+  );
+}
+
+/** Pasting starts a new single-image run, so only while nothing else is open or running. */
+function canAcceptPaste() {
+  return !busy && settingsOverlay.hidden && bgEditorOverlay.hidden && refineOverlay.hidden;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error ?? new Error("could not read the pasted file"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function processPastedPath(path) {
+  activateTab("single");
+  await processSingle(path);
+}
+
+/** Reads the system clipboard through the backend (desktop only). */
+async function pasteFromSystemClipboard() {
+  if (!canAcceptPaste()) return;
+  try {
+    const path = await invoke("paste_clipboard_image", { fileStem: pastedFileStem() });
+    await processPastedPath(path);
+  } catch (err) {
+    setStatus(`Paste failed: ${err}`);
+    showToast(`Nothing to paste: ${err}`, { kind: "warning" });
+  }
+}
+
+// Time of the last paste event this page handled. Cmd/Ctrl+V reaches the
+// page as a DOM `paste` event on some platforms and not others (it depends
+// on the webview and on whether an Edit menu routes it), so the keydown
+// handler below falls back to reading the clipboard itself only if no
+// paste event shows up shortly after the key press.
+let lastPasteEventAt = 0;
+
+document.addEventListener("paste", async (event) => {
+  if (isEditableTarget(event.target)) return;
+  lastPasteEventAt = Date.now();
+  if (!canAcceptPaste()) return;
+  event.preventDefault();
+
+  const file = [...(event.clipboardData?.files ?? [])].find((f) => f.type.startsWith("image/"));
+  if (!file) {
+    if (!IS_ANDROID) await pasteFromSystemClipboard();
+    return;
+  }
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const path = await invoke("save_pasted_image", { dataUrl, fileStem: pastedFileStem() });
+    await processPastedPath(path);
+  } catch (err) {
+    setStatus(`Paste failed: ${err}`);
+    showToast(`Paste failed: ${err}`, { kind: "error" });
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  const isPasteKey =
+    (IS_MAC ? event.metaKey : event.ctrlKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "v";
+  if (!isPasteKey || IS_ANDROID || isEditableTarget(event.target)) return;
+  const pressedAt = Date.now();
+  setTimeout(() => {
+    if (lastPasteEventAt < pressedAt) pasteFromSystemClipboard();
+  }, 250);
+});
+
+singlePasteBtn.addEventListener("click", pasteFromSystemClipboard);
+
+if (IS_ANDROID) {
+  // No backend clipboard on Android; a long-press "Paste" still arrives as a DOM paste event.
+  singlePasteBtn.hidden = true;
+  singlePasteHint.hidden = true;
+  singleCopyBtn.hidden = true;
+  bgEditorCopyBtn.hidden = true;
+} else {
+  $("paste-shortcut").textContent = IS_MAC ? "⌘V" : "Ctrl+V";
+}
+
+// ---- Before/after: side by side, or one image with a draggable divider ----
+
+const PREVIEW_VIEW_KEY = "unbagrnd.previewView";
+
+function setPreviewView(view) {
+  const compare = view === "compare";
+  previewGrid.hidden = compare;
+  previewCompare.hidden = !compare;
+  for (const btn of previewViewToggle.querySelectorAll(".bg-shadow-preset")) {
+    btn.classList.toggle("active", btn.dataset.view === view);
+  }
+  try {
+    localStorage.setItem(PREVIEW_VIEW_KEY, view);
+  } catch {
+    // Storage unavailable: the choice just isn't remembered.
+  }
+}
+
+previewViewToggle.addEventListener("click", (event) => {
+  const btn = event.target.closest(".bg-shadow-preset");
+  if (btn) setPreviewView(btn.dataset.view);
+});
+
+compareRange.addEventListener("input", () => {
+  compareFrame.style.setProperty("--pos", `${compareRange.value}%`);
+});
+
+// The compare view mirrors the side-by-side images, including every refine
+// edit that updates the "after" preview.
+previewBefore.addEventListener("load", () => {
+  compareBefore.src = previewBefore.src;
+});
+previewAfter.addEventListener("load", () => {
+  compareAfter.src = previewAfter.src;
+});
+
+try {
+  setPreviewView(localStorage.getItem(PREVIEW_VIEW_KEY) === "compare" ? "compare" : "split");
+} catch {
+  setPreviewView("split");
+}
+
 /**
  * There's no real per-percent progress signal for a single inference call
  * (ONNX Runtime doesn't expose one), so this eases a fill toward 90% while
@@ -777,6 +970,8 @@ async function processSingle(path) {
     progress.finish();
     previewBefore.src = result.beforeDataUrl;
     previewAfter.src = result.afterDataUrl;
+    compareRange.value = "50";
+    compareFrame.style.setProperty("--pos", "50%");
     sessionOriginalDataUrl = result.beforeDataUrl;
     sessionStartDataUrl = result.afterDataUrl;
     singleOutputPathEl.textContent = result.outputPath;
@@ -803,16 +998,214 @@ async function processSingle(path) {
 const BASIC_COLORS = ["#ffffff", "#000000", "#ef4444", "#14b8a6"];
 const PASTEL_COLORS = ["#fbe4ea", "#fbe8d3", "#fdf6e3", "#e3f7ea", "#dbeafe", "#e6e6fa"];
 const NEUTRAL_COLORS = ["#d1d5db", "#9ca3af", "#6b7280", "#e7d9c9", "#c9a97e", "#7c5a3a"];
+// The usual red and blue backdrops for Indonesian ID photos (pas foto).
+const ID_PHOTO_COLORS = [
+  { hex: "#d7262b", title: "ID photo red (merah)" },
+  { hex: "#1e4fa3", title: "ID photo blue (biru)" },
+];
+const ID_PHOTO_RED = ID_PHOTO_COLORS[0].hex;
+const GRADIENT_PRESETS = [
+  { from: "#ffffff", to: "#e2e8f0", angleDeg: 180, title: "Studio light" },
+  { from: "#a1c4fd", to: "#c2e9fb", angleDeg: 180, title: "Sky" },
+  { from: "#ffecd2", to: "#fcb69f", angleDeg: 135, title: "Peach" },
+  { from: "#fbc2eb", to: "#a6c1ee", angleDeg: 135, title: "Candy" },
+  { from: "#d4fc79", to: "#96e6a1", angleDeg: 135, title: "Mint" },
+  { from: "#4b5563", to: "#111827", angleDeg: 180, title: "Studio dark" },
+];
+
+/**
+ * Output size presets shared by the background editor and batch options.
+ * `crop`/`padding` are the defaults applied when a preset is picked (the
+ * editor lets you tweak them afterwards); `w`/`h` a fixed output size in
+ * pixels; `align: "bottom"` sits the subject on the bottom edge (ID photos,
+ * where the shoulders run off the frame). ID photo sizes are at 300 dpi.
+ */
+const SIZE_PRESETS = [
+  { key: "original", label: "Original size", crop: false, padding: 0 },
+  { key: "subject", label: "Crop to subject", crop: true, padding: 5 },
+  { key: "square-1000", group: "Marketplace", label: "Square 1:1 — 1000×1000", w: 1000, h: 1000, crop: true, padding: 8 },
+  { key: "square-2000", group: "Marketplace", label: "Square 1:1 HD — 2000×2000", w: 2000, h: 2000, crop: true, padding: 8 },
+  { key: "id-2x3", group: "ID photo (pas foto)", label: "2×3 cm — 236×354", w: 236, h: 354, crop: true, padding: 8, align: "bottom", idPhoto: true },
+  { key: "id-3x4", group: "ID photo (pas foto)", label: "3×4 cm — 354×472", w: 354, h: 472, crop: true, padding: 8, align: "bottom", idPhoto: true },
+  { key: "id-4x6", group: "ID photo (pas foto)", label: "4×6 cm — 472×709", w: 472, h: 709, crop: true, padding: 8, align: "bottom", idPhoto: true },
+  { key: "ig-square", group: "Social", label: "Instagram post 1:1 — 1080×1080", w: 1080, h: 1080, crop: true, padding: 8 },
+  { key: "ig-portrait", group: "Social", label: "Instagram portrait 4:5 — 1080×1350", w: 1080, h: 1350, crop: true, padding: 8 },
+  { key: "ig-story", group: "Social", label: "Story 9:16 — 1080×1920", w: 1080, h: 1920, crop: true, padding: 10 },
+  { key: "wa-sticker", group: "Social", label: "WhatsApp sticker — 512×512", w: 512, h: 512, crop: true, padding: 4, sticker: true },
+];
+
+function findSizePreset(key) {
+  return SIZE_PRESETS.find((p) => p.key === key) ?? SIZE_PRESETS[0];
+}
+
+/** Fills a <select> with SIZE_PRESETS, grouped by `group`. */
+function populateSizeSelect(select) {
+  select.innerHTML = "";
+  const groups = new Map();
+  for (const preset of SIZE_PRESETS) {
+    const option = document.createElement("option");
+    option.value = preset.key;
+    option.textContent = preset.label;
+    if (!preset.group) {
+      select.appendChild(option);
+      continue;
+    }
+    if (!groups.has(preset.group)) {
+      const optgroup = document.createElement("optgroup");
+      optgroup.label = preset.group;
+      groups.set(preset.group, optgroup);
+      select.appendChild(optgroup);
+    }
+    groups.get(preset.group).appendChild(option);
+  }
+}
+
+/** The backend's FrameSpec for a preset plus crop/padding choices, or null for "leave the image as is". */
+function frameSpecFor(preset, crop, paddingPct) {
+  if (!crop && paddingPct <= 0 && !preset.w) return null;
+  return {
+    cropToSubject: crop,
+    paddingPct,
+    width: preset.w ?? null,
+    height: preset.h ?? null,
+    align: preset.align ?? null,
+  };
+}
+
+function cssGradient(g) {
+  return `linear-gradient(${g.angleDeg}deg, ${g.from}, ${g.to})`;
+}
 
 function markSwatchSelected(btn) {
-  for (const el of document.querySelectorAll(".swatch")) el.classList.remove("selected");
+  for (const el of bgEditorOverlay.querySelectorAll(".swatch")) el.classList.remove("selected");
   btn.classList.add("selected");
 }
 
 function selectBackgroundSwatch(hex, btn) {
   bgBackgroundHex = hex; // null for transparent
+  bgGradient = null;
+  bgGradientControls.hidden = true;
   markSwatchSelected(btn);
   scheduleBgPreviewUpdate();
+}
+
+function selectBackgroundGradient(gradient, btn) {
+  bgBackgroundHex = null;
+  bgGradient = { from: gradient.from, to: gradient.to, angleDeg: gradient.angleDeg };
+  bgGradientFromInput.value = gradient.from;
+  bgGradientToInput.value = gradient.to;
+  bgGradientAngleInput.value = String(gradient.angleDeg);
+  bgGradientAngleLabel.textContent = `${gradient.angleDeg}°`;
+  bgGradientControls.hidden = false;
+  markSwatchSelected(btn);
+  scheduleBgPreviewUpdate();
+}
+
+function buildGradientRow(container, onSelect) {
+  container.innerHTML = "";
+  for (const gradient of GRADIENT_PRESETS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch gradient-swatch";
+    btn.style.background = cssGradient(gradient);
+    btn.title = gradient.title;
+    btn.addEventListener("click", () => onSelect(gradient, btn));
+    container.appendChild(btn);
+  }
+}
+
+/** Builds the ID-photo color row and returns its red swatch, for auto-selecting it. */
+function buildIdPhotoRow() {
+  bgSwatchesId.innerHTML = "";
+  let red = null;
+  for (const { hex, title } of ID_PHOTO_COLORS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch";
+    btn.style.background = hex;
+    btn.title = title;
+    btn.addEventListener("click", () => selectBackgroundSwatch(hex, btn));
+    bgSwatchesId.appendChild(btn);
+    if (hex === ID_PHOTO_RED) red = btn;
+  }
+  return red;
+}
+
+/** Live-edits the selected gradient from its from/to/angle controls. */
+function onGradientControlInput() {
+  if (!bgGradient) return;
+  bgGradient = {
+    from: bgGradientFromInput.value,
+    to: bgGradientToInput.value,
+    angleDeg: Number(bgGradientAngleInput.value),
+  };
+  bgGradientAngleLabel.textContent = `${bgGradient.angleDeg}°`;
+  const selected = bgSwatchesGradient.querySelector(".swatch.selected");
+  if (selected) selected.style.background = cssGradient(bgGradient);
+  scheduleBgPreviewUpdate();
+}
+
+bgGradientFromInput.addEventListener("input", onGradientControlInput);
+bgGradientToInput.addEventListener("input", onGradientControlInput);
+bgGradientAngleInput.addEventListener("input", onGradientControlInput);
+
+function currentFrameSpecOrNull() {
+  return frameSpecFor(findSizePreset(bgSizeKey), bgCropToSubject, bgPaddingPct);
+}
+
+function renderBgSizeControls() {
+  const preset = findSizePreset(bgSizeKey);
+  bgSizeSelect.value = preset.key;
+  bgCropEnable.checked = bgCropToSubject;
+  bgPaddingInput.value = String(bgPaddingPct);
+  bgPaddingLabel.textContent = `${bgPaddingPct}%`;
+  let hint = "";
+  if (preset.idPhoto) {
+    hint = "Pick a red or blue ID photo background above. Printed at 300 dpi.";
+  } else if (preset.sticker) {
+    hint = "Tip: choose WebP in Settings, and keep the background transparent, for a WhatsApp sticker.";
+  } else if (preset.w) {
+    hint = `Saved at exactly ${preset.w}×${preset.h} px; the subject is scaled to fit.`;
+  }
+  bgSizeHint.textContent = hint;
+}
+
+bgSizeSelect.addEventListener("change", () => {
+  const preset = findSizePreset(bgSizeSelect.value);
+  bgSizeKey = preset.key;
+  bgCropToSubject = preset.crop;
+  bgPaddingPct = preset.padding;
+  renderBgSizeControls();
+  // An ID photo needs a backdrop; default to red if none is picked yet.
+  if (preset.idPhoto && bgBackgroundHex === null && bgGradient === null) {
+    const red = bgSwatchesId.querySelector(`[title^="ID photo red"]`);
+    if (red) {
+      selectBackgroundSwatch(ID_PHOTO_RED, red);
+      return;
+    }
+  }
+  scheduleBgPreviewUpdate();
+});
+
+bgCropEnable.addEventListener("change", () => {
+  bgCropToSubject = bgCropEnable.checked;
+  scheduleBgPreviewUpdate();
+});
+
+bgPaddingInput.addEventListener("input", () => {
+  bgPaddingPct = Number(bgPaddingInput.value);
+  bgPaddingLabel.textContent = `${bgPaddingPct}%`;
+  scheduleBgPreviewUpdate();
+});
+
+/** The background editor's current options, as the preview/export/copy commands take them. */
+function currentBgEditArgs() {
+  return {
+    backgroundHex: bgBackgroundHex,
+    gradient: bgGradient,
+    shadow: currentShadowSpecOrNull(),
+    frame: currentFrameSpecOrNull(),
+  };
 }
 
 function buildSwatchRow(container, colors) {
@@ -946,10 +1339,7 @@ function scheduleBgPreviewUpdate() {
 async function updateBgPreview() {
   const requestId = ++bgPreviewRequestId;
   try {
-    const dataUrl = await invoke("preview_background", {
-      backgroundHex: bgBackgroundHex,
-      shadow: currentShadowSpecOrNull(),
-    });
+    const dataUrl = await invoke("preview_background", currentBgEditArgs());
     if (requestId !== bgPreviewRequestId) return; // superseded by a newer request
     bgEditorPreview.src = dataUrl;
   } catch (err) {
@@ -967,6 +1357,12 @@ async function updateBgPreview() {
 
 singleEditBgBtn.addEventListener("click", async () => {
   bgBackgroundHex = null;
+  bgGradient = null;
+  bgGradientControls.hidden = true;
+  bgSizeKey = "original";
+  bgCropToSubject = false;
+  bgPaddingPct = 0;
+  renderBgSizeControls();
   bgShadowEnabled = false;
   bgShadowPreset = "natural";
   bgShadowOpacity = 50;
@@ -987,6 +1383,8 @@ singleEditBgBtn.addEventListener("click", async () => {
   const transparentBtn = buildBasicSwatchRow();
   buildSwatchRow(bgSwatchesPastel, PASTEL_COLORS);
   buildSwatchRow(bgSwatchesNeutral, NEUTRAL_COLORS);
+  buildIdPhotoRow();
+  buildGradientRow(bgSwatchesGradient, selectBackgroundGradient);
   transparentBtn.classList.add("selected");
 
   bgEditorPreview.src = previewAfter.src;
@@ -1006,6 +1404,8 @@ singleEditBgBtn.addEventListener("click", async () => {
 bgEditorDoneBtn.addEventListener("click", () => {
   bgEditorOverlay.hidden = true;
 });
+
+bgEditorCopyBtn.addEventListener("click", () => copyToClipboard("copy_background_to_clipboard", currentBgEditArgs()));
 
 bgShadowEnable.addEventListener("change", () => {
   bgShadowEnabled = bgShadowEnable.checked;
@@ -1047,8 +1447,7 @@ bgEditorDownloadBtn.addEventListener("click", async () => {
     setStatus("Saving…");
     const outputPath = await invoke("export_background", {
       outputDir,
-      backgroundHex: bgBackgroundHex,
-      shadow: currentShadowSpecOrNull(),
+      ...currentBgEditArgs(),
       exportFormat,
     });
     setStatus(`Saved to ${outputPath}`);
@@ -1599,14 +1998,16 @@ function setBatchSetupVisible(visible) {
 
 /** The default file name changes from `-nobg` to `-bg` once a background or shadow is applied. */
 function updateBatchNamePlaceholder() {
-  const compositing = batchBackgroundHex !== null || batchShadowEnable.checked;
+  const compositing =
+    batchBackgroundHex !== null || batchGradient !== null || batchShadowEnable.checked || batchFrameSpecOrNull() !== null;
   batchNameTemplateInput.placeholder = compositing ? "{name}-bg" : "{name}-nobg";
 }
 
 function buildBatchSwatches() {
   batchSwatchesEl.innerHTML = "";
-  const select = (hex, el) => {
-    batchBackgroundHex = hex;
+  const select = (hex, el, gradient = null) => {
+    batchBackgroundHex = gradient ? null : hex;
+    batchGradient = gradient ? { from: gradient.from, to: gradient.to, angleDeg: gradient.angleDeg } : null;
     for (const swatch of batchSwatchesEl.querySelectorAll(".swatch")) swatch.classList.remove("selected");
     el.classList.add("selected");
     updateBatchNamePlaceholder();
@@ -1636,7 +2037,44 @@ function buildBatchSwatches() {
   customInput.value = "#8855ee";
   customInput.addEventListener("input", () => select(customInput.value, customInput));
   batchSwatchesEl.appendChild(customInput);
+
+  for (const { hex, title } of ID_PHOTO_COLORS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch";
+    btn.style.background = hex;
+    btn.title = title;
+    btn.addEventListener("click", () => select(hex, btn));
+    batchSwatchesEl.appendChild(btn);
+  }
+
+  for (const gradient of GRADIENT_PRESETS) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "swatch gradient-swatch";
+    btn.style.background = cssGradient(gradient);
+    btn.title = gradient.title;
+    btn.addEventListener("click", () => select(null, btn, gradient));
+    batchSwatchesEl.appendChild(btn);
+  }
 }
+
+function batchFrameSpecOrNull() {
+  const preset = findSizePreset(batchSizeSelect.value);
+  return frameSpecFor(preset, preset.crop, preset.key === "original" ? 0 : Number(batchPaddingInput.value));
+}
+
+batchSizeSelect.addEventListener("change", () => {
+  const preset = findSizePreset(batchSizeSelect.value);
+  batchPaddingRow.hidden = preset.key === "original";
+  batchPaddingInput.value = String(preset.padding);
+  batchPaddingLabel.textContent = `${preset.padding}%`;
+  updateBatchNamePlaceholder();
+});
+
+batchPaddingInput.addEventListener("input", () => {
+  batchPaddingLabel.textContent = `${batchPaddingInput.value}%`;
+});
 
 batchShadowEnable.addEventListener("change", () => {
   batchShadowControls.hidden = !batchShadowEnable.checked;
@@ -1659,6 +2097,8 @@ batchShadowOpacityInput.addEventListener("input", () => {
 function readBatchOptions() {
   return {
     backgroundHex: batchBackgroundHex,
+    gradient: batchGradient,
+    frame: batchFrameSpecOrNull(),
     shadow: batchShadowEnable.checked
       ? {
           preset: batchShadowPreset,
@@ -2058,6 +2498,8 @@ async function init() {
 
   activateTab("single");
   buildBatchSwatches();
+  populateSizeSelect(bgSizeSelect);
+  populateSizeSelect(batchSizeSelect);
   refreshOutputDirDisplay();
   await setupDragAndDrop();
 

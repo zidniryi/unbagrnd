@@ -13,7 +13,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_fs::FsExt;
 use unbagrnd_core::bg_remove::{self, InferenceState};
 
-use crate::background::{self, ShadowSpec};
+use crate::background::{self, Fill, GradientSpec, ShadowSpec};
+use crate::clipboard;
+use crate::frame::{self, FrameSpec};
 use crate::matte::{self, EdgeSpec};
 use crate::models::{self, ModelInfo, ModelSpec};
 use crate::refine::{self, Stroke};
@@ -328,54 +330,221 @@ pub async fn preview_image(app: AppHandle, path: String) -> Result<String, Strin
     .map_err(|e| format!("background task failed: {e}"))?
 }
 
+/// Everything the background editor (and a batch run) can do to a cutout
+/// besides the cutout itself: framing (crop to subject, padding, output
+/// size), the fill behind it (solid color or gradient) and a drop shadow.
+/// Framing runs first so the shadow and fill are laid out on the final canvas.
+fn render_edit(
+    image: &RgbaImage,
+    fill: &Fill,
+    shadow: Option<&ShadowSpec>,
+    frame: Option<&FrameSpec>,
+) -> RgbaImage {
+    let framed;
+    let image = match frame {
+        Some(spec) if !spec.is_identity() => {
+            framed = frame::apply_frame(image, spec);
+            &framed
+        }
+        _ => image,
+    };
+    if fill.is_transparent() && shadow.is_none() {
+        return image.clone();
+    }
+    background::composite(image, fill, shadow)
+}
+
+/// Validates the background editor's options up front, so a bad value fails
+/// the request once instead of halfway through.
+fn resolve_edit(
+    background_hex: Option<&str>,
+    gradient: Option<&GradientSpec>,
+    frame: Option<&FrameSpec>,
+) -> Result<Fill, String> {
+    if let Some(frame) = frame {
+        frame.validate()?;
+    }
+    Fill::resolve(background_hex, gradient)
+}
+
 /// Recomposites the most recent single-image background-removal result
-/// (color fill + drop shadow) at preview resolution and returns it as a
+/// (framing + fill + drop shadow) at preview resolution and returns it as a
 /// data URL, for the "edit background" panel's live preview. `None` for
-/// `background_hex` means a transparent canvas (checkerboard); `None` for
-/// `shadow` means no shadow.
+/// `background_hex`/`gradient` means a transparent canvas (checkerboard);
+/// `None` for `shadow` means no shadow, and for `frame` the image as is.
 #[tauri::command]
 pub async fn preview_background(
     app: AppHandle,
     background_hex: Option<String>,
+    gradient: Option<GradientSpec>,
     shadow: Option<ShadowSpec>,
+    frame: Option<FrameSpec>,
 ) -> Result<String, String> {
+    let fill = resolve_edit(background_hex.as_deref(), gradient.as_ref(), frame.as_ref())?;
+    let frame = frame.map(|f| f.for_preview(PREVIEW_MAX_DIM));
     let image = last_session(&app)?.current;
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let preview_src = DynamicImage::ImageRgba8(image)
             .resize(PREVIEW_MAX_DIM, PREVIEW_MAX_DIM, FilterType::Triangle)
             .to_rgba8();
-        let composited = background::composite(&preview_src, background_hex.as_deref(), shadow.as_ref())?;
-        to_data_url(&DynamicImage::ImageRgba8(composited))
+        let composited = render_edit(&preview_src, &fill, shadow.as_ref(), frame.as_ref());
+        // A crop with lots of padding can grow past the preview cap.
+        to_data_url_sized(&DynamicImage::ImageRgba8(composited), PREVIEW_MAX_DIM)
     })
     .await
     .map_err(|e| format!("background task failed: {e}"))?
 }
 
 /// Recomposites the most recent single-image background-removal result at
-/// full resolution (color fill + drop shadow) and writes it next to (or
+/// full resolution (framing + fill + drop shadow) and writes it next to (or
 /// into `output_dir`, if given) the original source file, suffixed `-bg`.
 /// Returns the written path.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn export_background(
     app: AppHandle,
     output_dir: Option<String>,
     background_hex: Option<String>,
+    gradient: Option<GradientSpec>,
     shadow: Option<ShadowSpec>,
+    frame: Option<FrameSpec>,
     export_format: Option<String>,
 ) -> Result<String, String> {
     let format = resolve_export_format(&app, export_format.as_deref())?;
-    let session = last_session(&app)?;
-    let (input_path, image) = (session.input_path, session.current);
+    let fill = resolve_edit(background_hex.as_deref(), gradient.as_ref(), frame.as_ref())?;
+    let (input_path, image) = last_current(&app)?;
     let output_path = output_path_for(&app, &input_path, output_dir.as_deref(), "-bg", &format)?;
 
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let composited = background::composite(&image, background_hex.as_deref(), shadow.as_ref())?;
+        let composited = render_edit(&image, &fill, shadow.as_ref(), frame.as_ref());
         write_output(&composited, &output_path, &format)?;
         publish_to_gallery(&app, &output_path, &format);
         Ok(output_path.display().to_string())
     })
     .await
     .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Copies the working image (the cutout plus any committed refine edits,
+/// transparent background) to the system clipboard at full resolution.
+#[tauri::command]
+pub async fn copy_result_to_clipboard(app: AppHandle) -> Result<(), String> {
+    let (_, image) = last_current(&app)?;
+    tauri::async_runtime::spawn_blocking(move || clipboard::write_image(&image))
+        .await
+        .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Copies what the background editor would export - same options as
+/// [`export_background`] - to the system clipboard at full resolution.
+#[tauri::command]
+pub async fn copy_background_to_clipboard(
+    app: AppHandle,
+    background_hex: Option<String>,
+    gradient: Option<GradientSpec>,
+    shadow: Option<ShadowSpec>,
+    frame: Option<FrameSpec>,
+) -> Result<(), String> {
+    let fill = resolve_edit(background_hex.as_deref(), gradient.as_ref(), frame.as_ref())?;
+    let (_, image) = last_current(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        clipboard::write_image(&render_edit(&image, &fill, shadow.as_ref(), frame.as_ref()))
+    })
+    .await
+    .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Resolves what's on the system clipboard to an image file path for
+/// `remove_background_single`. An image file copied in a file manager is
+/// used in place (so the result is saved next to it, like a dropped file);
+/// raw image data is saved as a PNG under `file_stem` (sanitized; the
+/// frontend names it after the local time) in the app's paste folder.
+#[tauri::command]
+pub async fn paste_clipboard_image(app: AppHandle, file_stem: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        match clipboard::read()? {
+            clipboard::Pasted::Files(files) => files
+                .into_iter()
+                .find(|p| {
+                    p.is_file()
+                        && p.extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| IMAGE_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+                })
+                .map(|p| p.display().to_string())
+                .ok_or_else(|| "the copied file isn't an image".to_string()),
+            clipboard::Pasted::Image(image) => save_pasted(&app, &file_stem, &image),
+        }
+    })
+    .await
+    .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Same as [`paste_clipboard_image`], for an image the webview's own paste
+/// event delivered (a `data:` URL) - the path Android uses, and the one
+/// that also picks up an image *file* copied in a file manager.
+#[tauri::command]
+pub async fn save_pasted_image(app: AppHandle, data_url: String, file_stem: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        let encoded = data_url
+            .split_once(";base64,")
+            .map(|(_, data)| data)
+            .ok_or_else(|| "the pasted data isn't a base64 data URL".to_string())?;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded.trim())
+            .map_err(|e| format!("could not decode the pasted image: {e}"))?;
+        let image = image::load_from_memory(&bytes)
+            .map_err(|e| format!("the pasted data isn't a supported image: {e}"))?
+            .to_rgba8();
+        save_pasted(&app, &file_stem, &image)
+    })
+    .await
+    .map_err(|e| format!("background task failed: {e}"))?
+}
+
+/// Where pasted images are kept until they've been processed.
+fn pasted_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_cache_dir()
+        .map(|dir| dir.join("pasted"))
+        .map_err(|e| format!("could not resolve the app cache directory: {e}"))
+}
+
+/// Writes a pasted image to [`pasted_dir`] as `<file_stem>.png` and returns
+/// its path. Earlier pastes are deleted first: their pixels already live in
+/// memory (the result session), the file only exists to name the output.
+fn save_pasted(app: &AppHandle, file_stem: &str, image: &RgbaImage) -> Result<String, String> {
+    let dir = pasted_dir(app)?;
+    if dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+
+    let stem = render_name_template(file_stem, "pasted", 1, 1);
+    let path = dir.join(format!("{stem}.png"));
+    image
+        .save_with_format(&path, ImageFormat::Png)
+        .map_err(|e| format!("could not save the pasted image: {e}"))?;
+    Ok(path.display().to_string())
+}
+
+/// Default save location for results of pasted images, which have no
+/// folder of their own to save next to: `Pictures/unbagrnd` on desktop,
+/// the app's own exports folder otherwise (Android also publishes every
+/// export to the gallery).
+fn pasted_output_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    if let Ok(pictures) = app.path().picture_dir() {
+        return Ok(pictures.join("unbagrnd"));
+    }
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join("exports"))
+        .map_err(|e| format!("could not resolve a save directory: {e}"))
 }
 
 /// Picks the "restore to" target the refine panel's `restore_to` string
@@ -589,8 +758,12 @@ pub async fn reveal_last_export_in_gallery(app: AppHandle) -> Result<(), String>
 pub struct BatchOptions {
     /// `#rrggbb` fill for the transparent area; `None` keeps it transparent.
     pub background_hex: Option<String>,
+    /// Gradient fill for the transparent area; overrides `background_hex`.
+    pub gradient: Option<GradientSpec>,
     /// Drop shadow rendered beneath each subject; `None` for no shadow.
     pub shadow: Option<ShadowSpec>,
+    /// Crop to subject / padding / fixed output size for every image.
+    pub frame: Option<FrameSpec>,
     /// Output file name (without extension), with `{name}` replaced by the
     /// source file's name and `{index}` by its 1-based position in the
     /// batch. Empty/`None` means `{name}-nobg` (or `{name}-bg` when a
@@ -640,11 +813,15 @@ pub async fn remove_background_batch(
     options: Option<BatchOptions>,
 ) -> Result<BatchSummary, String> {
     let options = options.unwrap_or_default();
-    // Fail the whole run up front on a bad color instead of once per file.
-    if let Some(hex) = options.background_hex.as_deref() {
-        background::parse_hex_color(hex)?;
-    }
-    let compositing = options.background_hex.is_some() || options.shadow.is_some();
+    // Fail the whole run up front on a bad color or size instead of once per file.
+    let fill = resolve_edit(
+        options.background_hex.as_deref(),
+        options.gradient.as_ref(),
+        options.frame.as_ref(),
+    )?;
+    let compositing = !fill.is_transparent()
+        || options.shadow.is_some()
+        || options.frame.as_ref().is_some_and(|f| !f.is_identity());
     let template = options
         .name_template
         .as_deref()
@@ -702,6 +879,7 @@ pub async fn remove_background_batch(
                 let raw_input_path = raw_input_path.clone();
                 let format = format.clone();
                 let options = options.clone();
+                let fill = fill.clone();
                 let outcome = tauri::async_runtime::spawn_blocking(
                     move || -> Result<(PathBuf, String), String> {
                         let original = open_image(&app, &raw_input_path)?;
@@ -713,11 +891,12 @@ pub async fn remove_background_batch(
                             &original,
                         )?;
                         if compositing {
-                            result = background::composite(
+                            result = render_edit(
                                 &result,
-                                options.background_hex.as_deref(),
+                                &fill,
                                 options.shadow.as_ref(),
-                            )?;
+                                options.frame.as_ref(),
+                            );
                         }
                         write_output(&result, &output_path, &format)?;
                         publish_to_gallery(&app, &output_path, &format);
@@ -911,6 +1090,12 @@ fn output_path_for_stem(
 
     let dir = match output_dir {
         Some(dir) => PathBuf::from(dir),
+        None if pasted_dir(app).is_ok_and(|pasted| input_path.starts_with(pasted)) => {
+            let dir = pasted_output_dir(app)?;
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+            dir
+        }
         None => match input_path.parent() {
             // A real, existing directory next to the source file - the
             // normal desktop case.

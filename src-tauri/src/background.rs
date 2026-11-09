@@ -1,5 +1,5 @@
-//! On-device background color fill + drop shadow compositing for the
-//! single-image "edit background" panel. Everything here operates on an
+//! On-device background fill (solid color or linear gradient) + drop shadow
+//! compositing for the single-image "edit background" panel and batch runs. Everything here operates on an
 //! already background-removed RGBA image; no AI or network involved,
 //! consistent with the rest of the app.
 
@@ -19,6 +19,74 @@ pub struct ShadowSpec {
     /// Only used when `preset == "custom"`: offset distance, as a
     /// percentage of the image's longer side.
     pub distance_pct: Option<f32>,
+}
+
+/// A two-stop linear gradient, with the same angle convention as CSS
+/// `linear-gradient(<angle>deg, from, to)` so the frontend can draw its
+/// swatches with plain CSS and get an identical result: 0 = bottom to top,
+/// 90 = left to right, 180 = top to bottom.
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GradientSpec {
+    pub from: String,
+    pub to: String,
+    pub angle_deg: f32,
+}
+
+/// What goes behind the subject.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Fill {
+    Transparent,
+    Solid(Rgba<u8>),
+    Linear { from: Rgba<u8>, to: Rgba<u8>, angle_deg: f32 },
+}
+
+impl Fill {
+    /// Resolves the frontend's background options. A gradient takes
+    /// precedence over a solid color; neither means transparent.
+    pub fn resolve(background_hex: Option<&str>, gradient: Option<&GradientSpec>) -> Result<Fill, String> {
+        if let Some(g) = gradient {
+            if !g.angle_deg.is_finite() {
+                return Err("invalid gradient angle".to_string());
+            }
+            return Ok(Fill::Linear {
+                from: parse_hex_color(&g.from)?,
+                to: parse_hex_color(&g.to)?,
+                angle_deg: g.angle_deg,
+            });
+        }
+        Ok(match background_hex {
+            Some(hex) => Fill::Solid(parse_hex_color(hex)?),
+            None => Fill::Transparent,
+        })
+    }
+
+    pub fn is_transparent(&self) -> bool {
+        matches!(self, Fill::Transparent)
+    }
+
+    /// A `w` x `h` canvas painted with this fill.
+    fn render(&self, w: u32, h: u32) -> RgbaImage {
+        match *self {
+            Fill::Transparent => ImageBuffer::from_pixel(w, h, Rgba([0, 0, 0, 0])),
+            Fill::Solid(color) => ImageBuffer::from_pixel(w, h, color),
+            Fill::Linear { from, to, angle_deg } => {
+                // CSS gradient line: through the center, along (sin a, -cos a),
+                // long enough that the corners land exactly on 0% and 100%.
+                let angle = angle_deg.to_radians();
+                let (dx, dy) = (angle.sin(), -angle.cos());
+                let (wf, hf) = (w as f32, h as f32);
+                let length = (wf * dx.abs() + hf * dy.abs()).max(1.0);
+                let (cx, cy) = (wf / 2.0, hf / 2.0);
+                ImageBuffer::from_fn(w, h, |x, y| {
+                    let (px, py) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                    let t = ((px * dx + py * dy) / length + 0.5).clamp(0.0, 1.0);
+                    let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
+                    Rgba([lerp(from.0[0], to.0[0]), lerp(from.0[1], to.0[1]), lerp(from.0[2], to.0[2]), 255])
+                })
+            }
+        }
+    }
 }
 
 /// Parses a `#rrggbb` (or bare `rrggbb`) hex string into an opaque color.
@@ -76,19 +144,12 @@ fn shadow_params(spec: &ShadowSpec, w: u32, h: u32) -> (f32, f32, f32) {
     }
 }
 
-/// Composites `image` (an already background-removed RGBA cutout) onto a
-/// solid `background_hex` fill (or a transparent canvas if `None`), with an
-/// optional drop shadow rendered from the cutout's own alpha channel —
-/// entirely on-device, no AI involved.
-pub fn composite(
-    image: &RgbaImage,
-    background_hex: Option<&str>,
-    shadow: Option<&ShadowSpec>,
-) -> Result<RgbaImage, String> {
+/// Composites `image` (an already background-removed RGBA cutout) onto
+/// `fill`, with an optional drop shadow rendered from the cutout's own
+/// alpha channel — entirely on-device, no AI involved.
+pub fn composite(image: &RgbaImage, fill: &Fill, shadow: Option<&ShadowSpec>) -> RgbaImage {
     let (w, h) = image.dimensions();
-    let background = background_hex.map(parse_hex_color).transpose()?;
-    let mut out: RgbaImage =
-        ImageBuffer::from_pixel(w, h, background.unwrap_or(Rgba([0, 0, 0, 0])));
+    let mut out = fill.render(w, h);
 
     if let Some(spec) = shadow {
         let (dx, dy, sigma) = shadow_params(spec, w, h);
@@ -123,7 +184,7 @@ pub fn composite(
         *pixel = over(*pixel, *image.get_pixel(x, y));
     }
 
-    Ok(out)
+    out
 }
 
 #[cfg(test)]
@@ -144,22 +205,43 @@ mod tests {
     #[test]
     fn no_background_no_shadow_is_unchanged() {
         let image = cutout();
-        let out = composite(&image, None, None).unwrap();
+        let out = composite(&image, &Fill::Transparent, None);
         assert_eq!(out, image);
     }
 
     #[test]
     fn solid_background_fills_transparent_pixels_and_keeps_subject() {
         let image = cutout();
-        let out = composite(&image, Some("#ffffff"), None).unwrap();
+        let fill = Fill::resolve(Some("#ffffff"), None).unwrap();
+        let out = composite(&image, &fill, None);
         assert_eq!(out.get_pixel(0, 0), &Rgba([255, 255, 255, 255]));
         assert_eq!(out.get_pixel(4, 4), &Rgba([220, 40, 40, 255]));
     }
 
     #[test]
     fn rejects_malformed_hex_colors() {
-        let image = cutout();
-        assert!(composite(&image, Some("not-a-color"), None).is_err());
+        assert!(Fill::resolve(Some("not-a-color"), None).is_err());
+        let gradient = GradientSpec { from: "#fff".to_string(), to: "#000000".to_string(), angle_deg: 90.0 };
+        assert!(Fill::resolve(None, Some(&gradient)).is_err());
+    }
+
+    #[test]
+    fn gradient_takes_precedence_and_runs_in_the_css_direction() {
+        let gradient = GradientSpec { from: "#000000".to_string(), to: "#ffffff".to_string(), angle_deg: 90.0 };
+        let fill = Fill::resolve(Some("#ff0000"), Some(&gradient)).unwrap();
+        assert!(matches!(fill, Fill::Linear { .. }));
+
+        // 90deg = left to right: dark on the left edge, light on the right,
+        // and the same down each column.
+        let out = composite(&ImageBuffer::new(100, 10), &fill, None);
+        assert!(out.get_pixel(0, 5).0[0] < 5);
+        assert!(out.get_pixel(99, 5).0[0] > 250);
+        assert_eq!(out.get_pixel(50, 0), out.get_pixel(50, 9));
+
+        // 180deg = top to bottom.
+        let down = Fill::Linear { from: Rgba([0, 0, 0, 255]), to: Rgba([255, 255, 255, 255]), angle_deg: 180.0 };
+        let out = composite(&ImageBuffer::new(10, 100), &down, None);
+        assert!(out.get_pixel(5, 0).0[0] < out.get_pixel(5, 99).0[0]);
     }
 
     #[test]
@@ -171,7 +253,8 @@ mod tests {
             angle_deg: None,
             distance_pct: None,
         };
-        let out = composite(&image, Some("#ffffff"), Some(&shadow)).unwrap();
+        let fill = Fill::resolve(Some("#ffffff"), None).unwrap();
+        let out = composite(&image, &fill, Some(&shadow));
 
         // The subject itself is drawn last, untouched by the shadow layer beneath it.
         assert_eq!(out.get_pixel(4, 4), &Rgba([220, 40, 40, 255]));
