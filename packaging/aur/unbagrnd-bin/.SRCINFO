@@ -1,0 +1,22 @@
+pkgbase = unbagrnd-bin
+	pkgdesc = Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry.
+	pkgver = 0.6.0
+	pkgrel = 1
+	url = https://github.com/zidniryi/unbagrnd
+	arch = x86_64
+	license = MIT
+	depends = webkit2gtk-4.1
+	depends = gtk3
+	depends = openssl
+	depends = hicolor-icon-theme
+	provides = unbagrnd
+	conflicts = unbagrnd
+	noextract = unbagrnd-0.6.0.deb
+	options = !strip
+	options = !debug
+	source = unbagrnd-0.6.0.deb::https://github.com/zidniryi/unbagrnd/releases/download/v0.6.0/unbagrnd_0.6.0_amd64.deb
+	source = LICENSE-0.6.0::https://raw.githubusercontent.com/zidniryi/unbagrnd/v0.6.0/LICENSE
+	sha256sums = ace0aaf876d0ace709cde4d009c114b62b24bbb9439f4de3836ec1db5a76ba00
+	sha256sums = SKIP
+
+pkgname = unbagrnd-bin

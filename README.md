@@ -119,7 +119,7 @@ Grab the installer for your platform from the
 - **macOS:** `.dmg` (Apple Silicon only — the on-device ML runtime this app
   depends on no longer ships prebuilt binaries for Intel Macs)
 - **Windows:** `.msi` / `.exe`
-- **Linux:** `.AppImage` / `.deb`
+- **Linux:** `.AppImage` / `.deb` / `.rpm` (Arch: see [Arch Linux](#arch-linux-aur) below)
 - **Android:** `.apk` / `.aab` — release-signed, installs and upgrades
   in-place like any other app (see [Android](#android) below for building
   one yourself)
@@ -127,6 +127,20 @@ Grab the installer for your platform from the
 On first launch, or the first time you remove a background, unbagrnd
 downloads the model (~170 MB) and shows a progress bar while it does. That
 only happens once — every run after that is fully offline.
+
+### Arch Linux (AUR)
+
+[`packaging/aur/`](packaging/aur) has two PKGBUILDs:
+
+- **`unbagrnd-bin`**: repackages the prebuilt `.deb` from the release (quick, no compiling)
+- **`unbagrnd`**: builds from the tagged source (needs `cargo`, `nodejs`, `npm`; the build
+  downloads ONNX Runtime, so it needs network access)
+
+```sh
+git clone https://github.com/zidniryi/unbagrnd.git
+cd unbagrnd/packaging/aur/unbagrnd-bin   # or packaging/aur/unbagrnd
+makepkg -si
+```
 
 ### macOS: "unbagrnd is damaged and can't be opened"
 
@@ -246,6 +260,10 @@ Pushing a tag matching `v*` (e.g. `v0.3.3`) triggers
 installers for macOS (Apple Silicon + Intel), Windows, and Linux, builds a
 debug-signed Android APK/AAB, and attaches all of it to a draft GitHub
 release.
+
+After the release is published, bump `pkgver` (and reset `pkgrel=1`) in
+`packaging/aur/*/PKGBUILD`, update the `.deb` checksum in `unbagrnd-bin`
+(`updpkgsums`), and regenerate `.SRCINFO` (`makepkg --printsrcinfo > .SRCINFO`).
 
 ## API
 
