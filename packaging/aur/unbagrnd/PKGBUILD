@@ -1,0 +1,45 @@
+# Maintainer: zidniryi <https://github.com/zidniryi>
+#
+# Builds unbagrnd from source. For the prebuilt binary, see ../unbagrnd-bin.
+
+pkgname=unbagrnd
+pkgver=0.6.0
+pkgrel=1
+pkgdesc="Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
+arch=('x86_64')
+url="https://github.com/zidniryi/unbagrnd"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'openssl' 'hicolor-icon-theme')
+makedepends=('git' 'cargo' 'nodejs' 'npm')
+# The `ort` crate downloads a prebuilt, statically linked ONNX Runtime during
+# the build, so build() needs network access.
+options=('!lto')
+source=("$pkgname::git+$url.git#tag=v$pkgver"
+        "$pkgname.desktop")
+sha256sums=('SKIP'
+            '731cd1385fb95d1995c49b171b9e7a98e1d3162a816a60a575d4d1c77aec5137')
+
+prepare() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+  npm ci
+}
+
+build() {
+  cd "$pkgname"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  # Binary only - packaging is done by makepkg, not Tauri's bundler.
+  npm run tauri build -- --no-bundle
+}
+
+package() {
+  cd "$pkgname"
+  install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+  install -Dm644 "$srcdir/$pkgname.desktop" "$pkgdir/usr/share/applications/$pkgname.desktop"
+  install -Dm644 src-tauri/icons/32x32.png      "$pkgdir/usr/share/icons/hicolor/32x32/apps/$pkgname.png"
+  install -Dm644 src-tauri/icons/128x128.png    "$pkgdir/usr/share/icons/hicolor/128x128/apps/$pkgname.png"
+  install -Dm644 src-tauri/icons/128x128@2x.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/$pkgname.png"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

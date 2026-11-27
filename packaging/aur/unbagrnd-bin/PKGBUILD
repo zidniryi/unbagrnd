@@ -1,0 +1,32 @@
+# Maintainer: zidniryi <https://github.com/zidniryi>
+#
+# Repackages the prebuilt .deb attached to each GitHub release.
+# For building from source instead, see ../unbagrnd/PKGBUILD.
+
+pkgname=unbagrnd-bin
+_pkgname=unbagrnd
+pkgver=0.6.0
+pkgrel=1
+pkgdesc="Remove image backgrounds locally, entirely on-device. No cloud, no account, no telemetry."
+arch=('x86_64')
+url="https://github.com/zidniryi/unbagrnd"
+license=('MIT')
+depends=('webkit2gtk-4.1' 'gtk3' 'openssl' 'hicolor-icon-theme')
+provides=("$_pkgname")
+conflicts=("$_pkgname")
+options=('!strip' '!debug')
+source=("$_pkgname-$pkgver.deb::$url/releases/download/v$pkgver/${_pkgname}_${pkgver}_amd64.deb"
+        "LICENSE-$pkgver::https://raw.githubusercontent.com/zidniryi/unbagrnd/v$pkgver/LICENSE")
+noextract=("$_pkgname-$pkgver.deb")
+sha256sums=('ace0aaf876d0ace709cde4d009c114b62b24bbb9439f4de3836ec1db5a76ba00'
+            'SKIP')
+
+prepare() {
+  mkdir -p deb
+  bsdtar -xf "$_pkgname-$pkgver.deb" -C deb
+}
+
+package() {
+  bsdtar -xf deb/data.tar.* -C "$pkgdir"
+  install -Dm644 "LICENSE-$pkgver" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

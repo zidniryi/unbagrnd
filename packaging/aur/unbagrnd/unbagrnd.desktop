@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=unbagrnd
+Comment=Remove image backgrounds locally, on-device.
+Exec=unbagrnd
+Icon=unbagrnd
+Terminal=false
+Categories=Graphics;Utility;
